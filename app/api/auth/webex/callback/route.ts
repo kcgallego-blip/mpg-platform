@@ -18,8 +18,8 @@ export async function GET(request: NextRequest) {
 
     const clientId = process.env.NEXT_PUBLIC_WEBEX_CLIENT_ID
     const clientSecret = process.env.WEBEX_CLIENT_SECRET
-    // Derive base URL from request if NEXT_PUBLIC_APP_URL is not set
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || `${request.nextUrl.protocol}//${request.nextUrl.host}`
+    // Remove trailing slash from base URL to avoid double slashes
+    const baseUrl = (process.env.NEXT_PUBLIC_APP_URL || `${request.nextUrl.protocol}//${request.nextUrl.host}`).replace(/\/$/, '')
     const redirectUri = `${baseUrl}/api/auth/callback`
 
     if (!clientId || !clientSecret) {

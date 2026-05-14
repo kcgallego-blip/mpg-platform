@@ -68,12 +68,12 @@ export const useAuthStore = create<AuthStore>((set) => ({
 
       const clientId = process.env.NEXT_PUBLIC_WEBEX_CLIENT_ID
       // Use window.location.origin as fallback for Vercel deployment
-      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin
+      // Remove trailing slash from base URL to avoid double slashes
+      const baseUrl = (process.env.NEXT_PUBLIC_APP_URL || window.location.origin).replace(/\/$/, '')
       const redirectUri = `${baseUrl}/api/auth/callback`
       const scopes = encodeURIComponent('spark:people_read spark:people_write')
       const state = Math.random().toString(36).substring(7)
 
-      // Debug log
       console.log('Webex redirect URI:', redirectUri)
 
       localStorage.setItem('webex_oauth_state', state)
