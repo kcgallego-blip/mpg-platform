@@ -1,12 +1,12 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuthStore } from '@/lib/authStore'
 import { LogOut } from 'lucide-react'
 import Image from 'next/image'
 
-export default function LoginPage() {
+function LoginPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const { user, checkAuth, loginWithWebex } = useAuthStore()
@@ -110,5 +110,20 @@ export default function LoginPage() {
         </button>
       </div>
     </div>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <div className="w-full max-w-md">
+        <div className="text-center">
+          <div className="font-hanken text-3xl font-bold text-primary-container mb-2">MPG</div>
+          <p className="text-on-surface-variant text-sm">Loading...</p>
+        </div>
+      </div>
+    }>
+      <LoginPageContent />
+    </Suspense>
   )
 }
