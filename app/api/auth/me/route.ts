@@ -9,7 +9,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
     }
 
-    const userData = JSON.parse(authCookie.value)
+    let userData
+    try {
+      userData = JSON.parse(authCookie.value)
+    } catch {
+      return NextResponse.json({ error: 'Invalid auth data' }, { status: 401 })
+    }
     
     // Fetch user role from database
     const { data: dbUser, error: dbError } = await supabase

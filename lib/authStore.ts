@@ -74,8 +74,6 @@ export const useAuthStore = create<AuthStore>((set) => ({
       const scopes = encodeURIComponent('spark:people_read spark:people_write')
       const state = Math.random().toString(36).substring(7)
 
-      console.log('Webex redirect URI:', redirectUri)
-
       localStorage.setItem('webex_oauth_state', state)
 
       const authUrl = `https://webexapis.com/v1/authorize?client_id=${clientId}&response_type=code&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes}&state=${state}`
@@ -135,7 +133,8 @@ export const useAuthStore = create<AuthStore>((set) => ({
         set({ user: null, loading: false })
       }
     } catch (error: any) {
-      set({ user: null, loading: false, error: error.message })
+      // Don't set error for 401 (not logged in)
+      set({ user: null, loading: false })
     }
   },
 }))

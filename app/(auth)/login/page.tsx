@@ -1,13 +1,14 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuthStore } from '@/lib/authStore'
 import { LogOut } from 'lucide-react'
 import Image from 'next/image'
 
 export default function LoginPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { user, checkAuth, loginWithWebex } = useAuthStore()
   const [isLoading, setIsLoading] = useState(false)
   const [isCheckingAuth, setIsCheckingAuth] = useState(true)
@@ -25,6 +26,14 @@ export default function LoginPage() {
 
     verifyAuth()
   }, [checkAuth])
+
+  // Check for error from callback
+  useEffect(() => {
+    const errorParam = searchParams.get('error')
+    if (errorParam) {
+      setError(errorParam.replace(/_/g, ' '))
+    }
+  }, [searchParams])
 
   // Redirect to dashboard if already logged in
   useEffect(() => {
