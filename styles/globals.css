@@ -1,0 +1,87 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  font-family: 'Inter', sans-serif;
+}
+
+/* Glassmorphism utility - WHITE MODE with original blue branding */
+.glass-effect {
+  background: rgba(52, 81, 141, 0.08);
+  backdrop-filter: blur(12px);
+  border: none;
+}
+
+.glass-effect-hover {
+  transition: all 0.3s ease;
+}
+
+.glass-effect-hover:hover {
+  backdrop-filter: blur(16px);
+  box-shadow: 0 8px 32px 0 rgba(52, 81, 141, 0.12);
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Mesh gradient blob animations */
+@keyframes blob {
+  0% {
+    transform: translate(0, 0) scale(1);
+  }
+  33% {
+    transform: translate(30px, -50px) scale(1.1);
+  }
+  66% {
+    transform: translate(-20px, 20px) scale(0.9);
+  }
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+}
+
+.animate-blob {
+  animation: blob 10s infinite ease-in-out;
+}
+
+.animation-delay-2000 {
+  animation-delay: 2s;
+}
+
+.animation-delay-4000 {
+  animation-delay: 4s;
+}
+
+/* Selection styling - adapted for white mode with blue accent */
+::selection {
+  background-color: #34518d;
+  color: #ffffff;
+}
+
+/* Custom scrollbar - white mode with blue accent */
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #34518d;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #afc6ff;
+}

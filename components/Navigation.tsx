@@ -1,0 +1,193 @@
+import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import { useAuthStore } from '@/lib/authStore'
+import { LogOut, Settings, User, LayoutDashboard, Ticket, FileText, ChevronDown, ChevronRight, Users } from 'lucide-react'
+import { useState } from 'react'
+import Image from 'next/image'
+
+const allNavItems = [
+  { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+  {
+    label: 'IT',
+    icon: Ticket,
+    children: [
+      { href: '/dashboard/it/submit-ticket', icon: FileText, label: 'Submit Ticket' },
+      { href: '/dashboard/it/ticket-reports', icon: Ticket, label: 'Ticket Reports' },
+    ],
+  },
+  {
+    label: 'Utilities',
+    icon: Settings,
+    children: [
+      { href: '/dashboard/utilities/ledger', icon: FileText, label: 'Ledger' },
+      { href: '/dashboard/utilities/accounts', icon: Users, label: 'Accounts' },
+    ],
+  },
+]
+
+function getNavItemsByRole(role: string | null | undefined) {
+  if (!role) {
+    return [{ href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' }]
+  }
+
+  switch (role) {
+    case 'Admin':
+      return allNavItems
+    case 'IT':
+    case 'Operations Manager':
+    case 'Supervisor':
+      return [
+        { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+        {
+          label: 'IT',
+          icon: Ticket,
+          children: [
+            { href: '/dashboard/it/submit-ticket', icon: FileText, label: 'Submit Ticket' },
+            { href: '/dashboard/it/ticket-reports', icon: Ticket, label: 'Ticket Reports' },
+          ],
+        },
+      ]
+    case 'Team Leader':
+      return [
+        { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+        {
+          label: 'IT',
+          icon: Ticket,
+          children: [
+            { href: '/dashboard/it/submit-ticket', icon: FileText, label: 'Submit Ticket' },
+          ],
+        },
+      ]
+    default:
+      return [{ href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' }]
+  }
+}
+
+export default function Navigation() {
+  const router = useRouter()
+  const { user, logout } = useAuthStore()
+  const [expandedItems, setExpandedItems] = useState<string[]>(['IT', 'Utilities'])
+
+  const navItems = getNavItemsByRole(user?.role)
+
+  const handleLogout = async () => {
+    await logout()
+    router.push('/login')
+  }
+
+  const toggleExpand = (label: string) => {
+    setExpandedItems(prev => 
+      prev.includes(label) 
+        ? prev.filter(item => item !== label)
+        : [...prev, label]
+    )
+  }
+
+  return (
+    <>
+      {/* Top Header */}
+      <header className="sticky top-0 z-50 bg-primary-container/90 backdrop-blur-glass-md border-b border-outline/20">
+        <div className="max-w-container mx-auto px-gutter py-4">
+          <div className="flex items-center justify-between">
+            {/* Logo */}
+            <Link href="/dashboard" className="font-hanken text-2xl font-bold text-primary-container flex items-center gap-2">
+              <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center p-1.5">
+                <Image
+                  src="/logo.png"
+                  alt="MPG Logo"
+                  width={28}
+                  height={28}
+                  className="object-contain"
+                />
+              </div>
+              MPG
+            </Link>
+
+            {/* User Menu */}
+            <div className="flex items-center gap-4">
+              <button className="p-2 rounded-lg hover:bg-surface-container-high transition-colors">
+                <Settings size={20} className="text-on-primary-container" />
+              </button>
+              <div className="relative group">
+                <button className="flex items-center gap-2 px-4 py-2 rounded-lg hover:bg-surface-container-high transition-colors">
+                  <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center overflow-hidden">
+                    {user?.avatar_image ? (
+                      <img
+                        src={user.avatar_image}
+                        alt="Profile"
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <User size={16} className="text-primary-container" />
+                    )}
+                  </div>
+                  <span className="text-on-primary-container text-sm font-medium">{user?.email?.split('@')[0]}</span>
+                </button>
+
+                {/* Dropdown */}
+                <div className="absolute right-0 mt-2 w-48 glass-effect rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 p-2">
+                  <button
+                    onClick={handleLogout}
+                    className="w-full flex items-center gap-3 px-4 py-2 rounded-lg text-error hover:bg-error/10 transition-colors text-sm font-medium"
+                  >
+                    <LogOut size={18} />
+                    Sign Out
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Left Sidebar */}
+      <aside className="fixed top-20 bottom-0 left-0 w-64 bg-surface-container/30 backdrop-blur-glass-lg border-r border-outline/20 z-40 overflow-y-auto">
+        <nav className="p-4 space-y-2">
+          {navItems.map((item) => {
+            if (item.children) {
+              const isExpanded = expandedItems.includes(item.label)
+              return (
+                <div key={item.label}>
+                  <button
+                    onClick={() => toggleExpand(item.label)}
+                    className="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-lg text-on-surface hover:bg-surface-container-high transition-colors text-sm font-medium"
+                  >
+                    <div className="flex items-center gap-3">
+                      <item.icon size={20} />
+                      <span>{item.label}</span>
+                    </div>
+                    {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                  </button>
+                  {isExpanded && (
+                    <div className="ml-8 mt-1 space-y-1">
+                      {item.children.map((child) => (
+                        <Link
+                          key={child.href}
+                          href={child.href}
+                          className="flex items-center gap-3 px-4 py-2 rounded-lg text-on-surface hover:bg-surface-container-high transition-colors text-sm"
+                        >
+                          <child.icon size={18} />
+                          <span>{child.label}</span>
+                        </Link>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            }
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className="flex items-center gap-3 px-4 py-3 rounded-lg text-on-surface hover:bg-surface-container-high transition-colors text-sm font-medium"
+              >
+                <item.icon size={20} />
+                <span>{item.label}</span>
+              </Link>
+            )
+          })}
+        </nav>
+      </aside>
+    </>
+  )
+}
