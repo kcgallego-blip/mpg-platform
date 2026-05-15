@@ -55,6 +55,7 @@ function getNavItemsByRole(role: string | null | undefined) {
           icon: Ticket,
           children: [
             { href: '/dashboard/it/submit-ticket', icon: FileText, label: 'Submit Ticket' },
+            { href: '/dashboard/it/ticket-reports', icon: Ticket, label: 'Ticket Reports' },
           ],
         },
       ]

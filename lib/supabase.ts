@@ -172,6 +172,27 @@ export type Database = {
           metric_value?: number | null
         }
       }
+      five9_logouts: {
+        Row: {
+          id: string
+          name: string | null
+          logout_time: string | null
+          login_time: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          name?: string | null
+          logout_time?: string | null
+          login_time?: string | null
+          created_at?: string
+        }
+        Update: {
+          name?: string | null
+          logout_time?: string | null
+          login_time?: string | null
+        }
+      }
     }
   }
 }

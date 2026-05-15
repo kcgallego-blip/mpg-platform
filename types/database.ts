@@ -140,6 +140,27 @@ export interface Database {
           updated_at?: string
         }
       }
+      five9_logouts: {
+        Row: {
+          id: string
+          name: string | null
+          logout_time: string | null
+          login_time: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          name?: string | null
+          logout_time?: string | null
+          login_time?: string | null
+          created_at?: string
+        }
+        Update: {
+          name?: string | null
+          logout_time?: string | null
+          login_time?: string | null
+        }
+      }
       analytics: {
         Row: {
           id: string

@@ -107,6 +107,27 @@ export async function getTickets() {
   return data as Database['public']['Tables']['tickets']['Row'][]
 }
 
+export async function getFive9Logouts() {
+  const { data, error } = await supabase
+    .from('five9')
+    .select('*')
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+  return data as Database['public']['Tables']['five9']['Row'][]
+}
+
+export async function getFive9LogoutIssues() {
+  // Get all five9 logout records
+  const { data, error } = await supabase
+    .from('five9')
+    .select('*')
+    .order('created_at', { ascending: false })
+
+  if (error) throw error
+  return data
+}
+
 // ============================================================================
 // AGENTS FUNCTIONS
 // ============================================================================
