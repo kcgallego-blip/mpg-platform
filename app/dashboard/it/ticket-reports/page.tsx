@@ -22,7 +22,7 @@ import {
   Save,
   Edit3,
 } from 'lucide-react'
-import { getTickets, getFive9Logouts, getFive9LogoutIssues, updateTicket, formatDate } from '@/lib/db'
+import { getTickets, getFive9LogoutIssues, updateTicket, formatDate } from '@/lib/db'
 
 type Ticket = {
   ticketid: number
@@ -464,7 +464,7 @@ export default function ITReportsPage() {
             </button>
           </div>
           <button
-            onClick={() => viewMode === 'it-issues' ? fetchTickets() : fetchFive9Logouts()}
+            onClick={() => viewMode === 'it-issues' ? fetchTickets() : fetchFive9LogoutIssues()}
             disabled={loading}
             className="flex items-center justify-center gap-2 px-lg py-md rounded-lg glass-effect text-on-surface font-medium transition-all hover:bg-surface-container-high disabled:opacity-50"
           >
@@ -926,6 +926,7 @@ export default function ITReportsPage() {
   // ===== Ticket Detail Modal for Open status =====
   const renderTicketDetailModal = () => {
     if (!selectedTicket) return null
+    const ticket = selectedTicket
     return (
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setSelectedTicket(null)}>
         <div className="bg-surface rounded-xl p-6 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
@@ -933,15 +934,15 @@ export default function ITReportsPage() {
           <div className="space-y-4">
             <div>
               <label className="text-label-sm font-medium text-on-surface-variant">Agent</label>
-              <p className="text-on-surface">{selectedTicket.name || 'Unknown'}</p>
+              <p className="text-on-surface">{ticket.name || 'Unknown'}</p>
             </div>
             <div>
               <label className="text-label-sm font-medium text-on-surface-variant">Category</label>
-              <p className="text-on-surface">{selectedTicket.category || 'Unknown'}</p>
+              <p className="text-on-surface">{ticket.category || 'Unknown'}</p>
             </div>
             <div>
               <label className="text-label-sm font-medium text-on-surface-variant">Concern</label>
-              <p className="text-on-surface">{selectedTicket.concern || 'None'}</p>
+              <p className="text-on-surface">{ticket.concern || 'None'}</p>
             </div>
             <div>
               <label className="text-label-sm font-medium text-on-surface-variant">Assisted By</label>
@@ -962,11 +963,11 @@ export default function ITReportsPage() {
             <button
               onClick={async () => {
                 if (tempAssistedBy) {
-                  await handleAssistedByChange(selectedTicket.ticketid, tempAssistedBy, selectedTicket.webex_message_id)
+                  await handleAssistedByChange(ticket.ticketid, tempAssistedBy, ticket.webex_message_id)
                 }
                 setSelectedTicket(null)
               }}
-              disabled={!tempAssistedBy || savingTicket === selectedTicket.ticketid}
+              disabled={!tempAssistedBy || savingTicket === ticket.ticketid}
               className="flex-1 px-4 py-2 rounded-lg bg-primary text-on-primary hover:bg-primary/90 transition-colors disabled:opacity-50"
             >
               Save
@@ -980,6 +981,7 @@ export default function ITReportsPage() {
   // ===== Troubleshooting Modal for Pending status =====
   const renderTroubleshootingModal = () => {
     if (!troubleshootingTicket) return null
+    const ticket = troubleshootingTicket
     return (
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setTroubleshootingTicket(null)}>
         <div className="bg-surface rounded-xl p-6 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
@@ -987,11 +989,11 @@ export default function ITReportsPage() {
           <div className="space-y-4">
             <div>
               <label className="text-label-sm font-medium text-on-surface-variant">Agent</label>
-              <p className="text-on-surface">{troubleshootingTicket.name || 'Unknown'}</p>
+              <p className="text-on-surface">{ticket.name || 'Unknown'}</p>
             </div>
             <div>
               <label className="text-label-sm font-medium text-on-surface-variant">Category</label>
-              <p className="text-on-surface">{troubleshootingTicket.category || 'Unknown'}</p>
+              <p className="text-on-surface">{ticket.category || 'Unknown'}</p>
             </div>
             <div>
               <label className="text-label-sm font-medium text-on-surface-variant">Troubleshooting</label>
@@ -1008,14 +1010,14 @@ export default function ITReportsPage() {
           <div className="flex gap-2 mt-6">
             <button
               onClick={() => setTroubleshootingTicket(null)}
-              disabled={savingTicket === troubleshootingTicket.ticketid}
+              disabled={savingTicket === ticket.ticketid}
               className="flex-1 px-4 py-2 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors"
             >
               Cancel
             </button>
             <button
               onClick={() => setShowFinalizeConfirm(true)}
-              disabled={savingTicket === troubleshootingTicket.ticketid}
+              disabled={savingTicket === ticket.ticketid}
               className="flex-1 px-4 py-2 rounded-lg bg-primary text-on-primary hover:bg-primary/90 transition-colors disabled:opacity-50"
             >
               Save
@@ -1099,7 +1101,7 @@ export default function ITReportsPage() {
             </button>
           </div>
           <button
-            onClick={() => viewMode === 'it-issues' ? fetchTickets() : fetchFive9Logouts()}
+            onClick={() => viewMode === 'it-issues' ? fetchTickets() : fetchFive9LogoutIssues()}
             disabled={loading}
             className="flex items-center justify-center gap-2 px-lg py-md rounded-lg glass-effect text-on-surface font-medium transition-all hover:bg-surface-container-high disabled:opacity-50"
           >
@@ -1510,15 +1512,15 @@ export default function ITReportsPage() {
             <div className="space-y-4">
               <div>
                 <label className="text-label-sm font-medium text-on-surface-variant">Agent</label>
-                <p className="text-on-surface">{selectedTicket.name || 'Unknown'}</p>
+                <p className="text-on-surface">{selectedTicket!.name || 'Unknown'}</p>
               </div>
               <div>
                 <label className="text-label-sm font-medium text-on-surface-variant">Category</label>
-                <p className="text-on-surface">{selectedTicket.category || 'Unknown'}</p>
+                <p className="text-on-surface">{selectedTicket!.category || 'Unknown'}</p>
               </div>
               <div>
                 <label className="text-label-sm font-medium text-on-surface-variant">Concern</label>
-                <p className="text-on-surface">{selectedTicket.concern || 'None'}</p>
+                <p className="text-on-surface">{selectedTicket!.concern || 'None'}</p>
               </div>
               <div>
                 <label className="text-label-sm font-medium text-on-surface-variant">Assisted By</label>
@@ -1539,11 +1541,11 @@ export default function ITReportsPage() {
               <button
                 onClick={async () => {
                   if (tempAssistedBy) {
-                    await handleAssistedByChange(selectedTicket.ticketid, tempAssistedBy, selectedTicket.webex_message_id)
+                    await handleAssistedByChange(selectedTicket!.ticketid, tempAssistedBy, selectedTicket!.webex_message_id)
                   }
                   setSelectedTicket(null)
                 }}
-                disabled={!tempAssistedBy || savingTicket === selectedTicket.ticketid}
+                disabled={!tempAssistedBy || savingTicket === selectedTicket!.ticketid}
                 className="flex-1 px-4 py-2 rounded-lg bg-primary text-on-primary hover:bg-primary/90 transition-colors disabled:opacity-50"
               >
                 Save
@@ -1561,11 +1563,11 @@ export default function ITReportsPage() {
             <div className="space-y-4">
               <div>
                 <label className="text-label-sm font-medium text-on-surface-variant">Agent</label>
-                <p className="text-on-surface">{troubleshootingTicket.name || 'Unknown'}</p>
+                <p className="text-on-surface">{troubleshootingTicket!.name || 'Unknown'}</p>
               </div>
               <div>
                 <label className="text-label-sm font-medium text-on-surface-variant">Category</label>
-                <p className="text-on-surface">{troubleshootingTicket.category || 'Unknown'}</p>
+                <p className="text-on-surface">{troubleshootingTicket!.category || 'Unknown'}</p>
               </div>
               <div>
                 <label className="text-label-sm font-medium text-on-surface-variant">Troubleshooting</label>
@@ -1582,14 +1584,14 @@ export default function ITReportsPage() {
             <div className="flex gap-2 mt-6">
               <button
                 onClick={() => setTroubleshootingTicket(null)}
-                disabled={savingTicket === troubleshootingTicket.ticketid}
+                disabled={savingTicket === troubleshootingTicket!.ticketid}
                 className="flex-1 px-4 py-2 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={() => setShowFinalizeConfirm(true)}
-                disabled={savingTicket === troubleshootingTicket.ticketid}
+                disabled={savingTicket === troubleshootingTicket!.ticketid}
                 className="flex-1 px-4 py-2 rounded-lg bg-primary text-on-primary hover:bg-primary/90 transition-colors disabled:opacity-50"
               >
                 Save
