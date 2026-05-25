@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { CalendarDays, Clock, LogIn, LogOut, UserX, Users } from 'lucide-react'
+import { useAuthStore } from '@/lib/authStore'
+import { useRouter } from 'next/navigation'
 
 type ScheduleAgent = {
   id: string
@@ -186,6 +188,16 @@ const formatShiftDate = (date: Date) =>
   }).format(date)
 
 export default function DashboardPage() {
+  const { user } = useAuthStore()
+  const router = useRouter()
+
+  // Redirect Agent role to /dashboard/agent
+  useEffect(() => {
+    if (user?.role === 'Agent') {
+      router.replace('/dashboard/agent')
+    }
+  }, [user?.role, router])
+
   const [agents, setAgents] = useState<ScheduleAgent[]>([])
   const [supervisors, setSupervisors] = useState<string[]>([])
   const [selectedSupervisor, setSelectedSupervisor] = useState('')

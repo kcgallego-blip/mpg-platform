@@ -47,6 +47,7 @@ function getNavItemsByRole(role: string | null | undefined) {
           ],
         },
       ]
+
     case 'Team Leader':
       return [
         { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
@@ -59,6 +60,8 @@ function getNavItemsByRole(role: string | null | undefined) {
           ],
         },
       ]
+    case 'Agent':
+      return [{ href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' }]
     default:
       return [{ href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' }]
   }

@@ -145,6 +145,16 @@ export async function getUniqueTeamLeaders() {
   return uniqueLeaders
 }
 
+export async function getAllAgents() {
+  const { data, error } = await supabase
+    .from('agents')
+    .select('name')
+    .order('name', { ascending: true })
+
+  if (error) throw error
+  return data.map(agent => agent.name)
+}
+
 export async function getAgentsByTeamLeader(teamLeader: string) {
   const { data, error } = await supabase
     .from('agents')

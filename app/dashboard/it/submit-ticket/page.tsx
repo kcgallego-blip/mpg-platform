@@ -2,26 +2,42 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { AlertTriangle, Bug, Server, Shield, ChevronRight, Send, Loader2, Search, Users } from 'lucide-react'
-import { createTicket, getUniqueTeamLeaders, getAgentsByTeamLeader, updateTicket } from '@/lib/db'
+import { Send, Loader2, Users, X } from 'lucide-react'
+import { createTicket, getAllAgents } from '@/lib/db'
 
 export default function ITReportPage() {
   const router = useRouter()
   const [formData, setFormData] = useState({
-    teamLeader: '',
-    agentName: '',
+    agentNames: [] as string[],
     category: '',
     concern: '',
+    startTime: '',
+    startAmPm: 'AM',
     isOnsite: false,
     affectsFive9: false,
   })
-  const [teamLeaders, setTeamLeaders] = useState<string[]>([])
-  const [agents, setAgents] = useState<string[]>([])
+  const [allAgents, setAllAgents] = useState<string[]>([])
   const [searchTerm, setSearchTerm] = useState('')
   const [showDropdown, setShowDropdown] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [loadingLeaders, setLoadingLeaders] = useState(true)
-  const [loadingAgents, setLoadingAgents] = useState(false)
+  const [loadingAgents, setLoadingAgents] = useState(true)
+
+  // Initialize start time when page loads
+  useEffect(() => {
+    const now = new Date()
+    let hours = now.getHours()
+    const minutes = now.getMinutes().toString().padStart(2, '0')
+    const ampm = hours >= 12 ? 'PM' : 'AM'
+    hours = hours % 12
+    hours = hours ? hours : 12
+    const startTime = `${hours.toString().padStart(2, '0')}:${minutes}`
+    
+    setFormData(prev => ({
+      ...prev,
+      startTime,
+      startAmPm: ampm
+    }))
+  }, [])
 
   // Close dropdown when clicking outside
   const dropdownRef = useCallback((node: HTMLDivElement | null) => {
@@ -35,6 +51,23 @@ export default function ITReportPage() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
+  const handleAgentSelect = (agent: string) => {
+    setFormData((prev) => {
+      const agentNames = prev.agentNames.includes(agent)
+        ? prev.agentNames.filter((a) => a !== agent)
+        : [...prev.agentNames, agent]
+      return { ...prev, agentNames }
+    })
+    setSearchTerm('')
+  }
+
+  const handleRemoveAgent = (agent: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      agentNames: prev.agentNames.filter((a) => a !== agent),
+    }))
+  }
+
   const categories = [
     'Hardware',
     'Internet Connection',
@@ -45,67 +78,46 @@ export default function ITReportPage() {
     'Others',
   ]
 
-  // Fetch team leaders on mount
-  useEffect(() => {
-    async function fetchTeamLeaders() {
-      try {
-        setLoadingLeaders(true)
-        const leaders = await getUniqueTeamLeaders()
-        setTeamLeaders(leaders)
-      } catch (error) {
-        console.error('Error fetching team leaders:', error)
-      } finally {
-        setLoadingLeaders(false)
-      }
-    }
-    fetchTeamLeaders()
-  }, [])
-
-  // Fetch agents when team leader changes
+  // Fetch all agents on mount
   useEffect(() => {
     async function fetchAgents() {
-      if (!formData.teamLeader) {
-        setAgents([])
-        return
-      }
       try {
         setLoadingAgents(true)
-        const agentNames = await getAgentsByTeamLeader(formData.teamLeader)
-        setAgents(agentNames)
-        setFormData((prev) => ({ ...prev, agentName: '' }))
+        const agentNames = await getAllAgents()
+        setAllAgents(agentNames)
       } catch (error) {
         console.error('Error fetching agents:', error)
-        setAgents([])
       } finally {
         setLoadingAgents(false)
       }
     }
     fetchAgents()
-  }, [formData.teamLeader])
+  }, [])
 
-  // Filter agents by search term
+  // Filter agents by search term and exclude already selected agents
   const filteredAgents = useMemo(() => {
-    if (!searchTerm) return agents
-    return agents.filter((agent) =>
-      agent.toLowerCase().includes(searchTerm.toLowerCase())
+    if (!searchTerm) return allAgents.filter(agent => !formData.agentNames.includes(agent))
+    return allAgents.filter((agent) =>
+      agent.toLowerCase().includes(searchTerm.toLowerCase()) && !formData.agentNames.includes(agent)
     )
-  }, [agents, searchTerm])
+  }, [allAgents, searchTerm, formData.agentNames])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (formData.agentNames.length === 0) {
+      alert('Please select at least one agent')
+      return
+    }
     setLoading(true)
 
     try {
       const now = new Date()
-      const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`
 
       const ticketData = {
         category: formData.category,
         concern: formData.concern,
         date: now.toISOString().split('T')[0],
-        start_time: currentTime,
-        name: formData.agentName,
-        team_leader: formData.teamLeader || null,
+        start_time: formData.startTime,
         onsite: formData.isOnsite,
         affected_five9: formData.affectsFive9,
         webex_message_id: null,
@@ -115,39 +127,44 @@ export default function ITReportPage() {
         status: 'Open',
       }
 
-      console.log('Submitting ticket data:', ticketData)
-      const result = await createTicket(ticketData)
-      console.log('Ticket created:', result)
+      const createdTickets = []
+      for (const agentName of formData.agentNames) {
+        const ticket = { ...ticketData, name: agentName }
+        console.log('Submitting ticket data:', ticket)
+        const result = await createTicket(ticket)
+        createdTickets.push(result)
+      }
 
-      // Trigger webhook to external system
+      // Trigger webhook for each ticket
       const webhookUrl = process.env.NEXT_PUBLIC_WEBHOOK_URL
       if (webhookUrl) {
-        try {
-          const ticketId = result.ticketid
-          const webhookEndpoint = `${webhookUrl}/api/ticket/message?id=${ticketId}`
-          console.log('Calling webhook:', webhookEndpoint)
-          
-          const response = await fetch(webhookEndpoint, {
-            method: 'GET',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-          })
-          
-          if (response.ok) {
-            console.log('Webhook called successfully')
-          } else {
-            console.warn('Webhook returned non-ok status:', response.status)
+        for (const result of createdTickets) {
+          try {
+            const ticketId = result.ticketid
+            const webhookEndpoint = `${webhookUrl}/api/ticket/message?id=${ticketId}`
+            console.log('Calling webhook:', webhookEndpoint)
+            
+            const response = await fetch(webhookEndpoint, {
+              method: 'GET',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+            })
+            
+            if (response.ok) {
+              console.log('Webhook called successfully')
+            } else {
+              console.warn('Webhook returned non-ok status:', response.status)
+            }
+          } catch (webhookError) {
+            console.error('Webhook call failed:', webhookError)
           }
-        } catch (webhookError) {
-          console.error('Webhook call failed:', webhookError)
-          // Don't throw - allow ticket creation to succeed even if webhook fails
         }
       } else {
         console.warn('WEBHOOK_URL environment variable not set')
       }
 
-      alert('IT Report submitted successfully!')
+      alert(`${createdTickets.length} IT Report(s) submitted successfully!`)
       router.push('/dashboard')
     } catch (error: any) {
       console.error('Error creating ticket:', error)
@@ -176,41 +193,34 @@ export default function ITReportPage() {
 
       {/* Form */}
       <form onSubmit={handleSubmit} className="space-y-8">
-        {/* Team Leader Dropdown */}
+        {/* Agent Name Dropdown (Searchable, Multi-select) */}
         <div>
           <label className="block text-on-surface text-label-md font-medium mb-3">
-            Team Leader <span className="text-error">*</span>
+            Agent Name(s) <span className="text-error">*</span>
           </label>
-          <div className="relative">
-            <select
-              required
-              value={formData.teamLeader}
-              onChange={(e) => handleChange('teamLeader', e.target.value)}
-              className="w-full px-4 py-3 rounded-lg bg-surface-container-low/50 border border-outline-variant/50 text-on-surface focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all appearance-none"
-            >
-              <option value="">Select a team leader</option>
-              {teamLeaders.map((leader) => (
-                <option key={leader} value={leader}>
-                  {leader}
-                </option>
+          
+          {/* Selected Agents Tags */}
+          {formData.agentNames.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-3">
+              {formData.agentNames.map((agent) => (
+                <div
+                  key={agent}
+                  className="flex items-center gap-1 px-3 py-1 rounded-full bg-primary-container/20 text-primary-container text-sm"
+                >
+                  {agent}
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveAgent(agent)}
+                    className="hover:text-primary transition-colors"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
               ))}
-            </select>
-            <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
-              <ChevronRight size={20} className="text-on-surface-variant rotate-[-90deg]" />
             </div>
-          </div>
-        </div>
+          )}
 
-        {/* Agent Name Dropdown (Searchable) */}
-        <div>
-          <label className="block text-on-surface text-label-md font-medium mb-3">
-            Agent Name <span className="text-error">*</span>
-          </label>
-          {!formData.teamLeader ? (
-            <div className="w-full px-4 py-3 rounded-lg bg-surface-container-low/50 text-on-surface-variant text-sm">
-              Please select a team leader first
-            </div>
-          ) : loadingAgents ? (
+          {loadingAgents ? (
             <div className="w-full px-4 py-3 rounded-lg bg-surface-container-low/50 flex items-center justify-center gap-2">
               <Loader2 size={18} className="animate-spin text-primary" />
               <span className="text-on-surface-variant">Loading agents...</span>
@@ -222,14 +232,10 @@ export default function ITReportPage() {
               </div>
               <input
                 type="text"
-                required
-                value={searchTerm || formData.agentName}
-                onChange={(e) => {
-                  setSearchTerm(e.target.value)
-                  setFormData((prev) => ({ ...prev, agentName: e.target.value }))
-                }}
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
                 onFocus={() => setShowDropdown(true)}
-                placeholder="Search or select agent name"
+                placeholder="Search agents..."
                 className="w-full pl-10 pr-4 py-3 rounded-lg bg-surface-container-low/50 border border-outline-variant/50 text-on-surface focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
               />
               {showDropdown && filteredAgents.length > 0 && (
@@ -238,16 +244,8 @@ export default function ITReportPage() {
                     <button
                       key={agent}
                       type="button"
-                      onClick={() => {
-                        handleChange('agentName', agent)
-                        setSearchTerm(agent)
-                        setShowDropdown(false)
-                      }}
-                       className={`w-full text-left px-3 py-2 rounded-lg hover:bg-surface-container-high transition-colors ${
-                         formData.agentName === agent
-                           ? 'bg-primary-container/20 text-primary-container'
-                           : 'text-on-surface'
-                       }`}
+                      onClick={() => handleAgentSelect(agent)}
+                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-surface-container-high transition-colors text-on-surface"
                     >
                       {agent}
                     </button>
@@ -256,6 +254,30 @@ export default function ITReportPage() {
               )}
             </div>
           )}
+        </div>
+
+        {/* Start Time */}
+        <div>
+          <label className="block text-on-surface text-label-md font-medium mb-3">
+            Start Time <span className="text-error">*</span>
+          </label>
+          <div className="flex gap-3">
+            <input
+              type="text"
+              value={formData.startTime}
+              onChange={(e) => handleChange('startTime', e.target.value)}
+              placeholder="HH:MM"
+              className="flex-1 px-4 py-3 rounded-lg bg-surface-container-low/50 border border-outline-variant/50 text-on-surface focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+            />
+            <select
+              value={formData.startAmPm}
+              onChange={(e) => handleChange('startAmPm', e.target.value)}
+              className="px-4 py-3 rounded-lg bg-surface-container-low/50 border border-outline-variant/50 text-on-surface focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+            >
+              <option value="AM">AM</option>
+              <option value="PM">PM</option>
+            </select>
+          </div>
         </div>
 
         {/* Issue Category */}

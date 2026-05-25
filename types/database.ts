@@ -182,6 +182,24 @@ export interface Database {
           metric_value?: number | null
         }
       }
+      tph: {
+        Row: {
+          ticket_num: number
+          agent: string | null
+          status: string | null
+          created_at: string
+        }
+        Insert: {
+          ticket_num: number
+          agent?: string | null
+          status?: string | null
+          created_at?: string
+        }
+        Update: {
+          agent?: string | null
+          status?: string | null
+        }
+      }
     }
   }
 }
