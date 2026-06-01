@@ -1,14 +1,15 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useAuthStore } from '@/lib/authStore'
 import { supabase } from '@/lib/supabase'
-import { Loader2, Ticket, AlertCircle } from 'lucide-react'
+import { Loader2, Ticket, CalendarDays, RefreshCw } from 'lucide-react'
 
 type TphTicket = {
   ticket_num: number
   agent: string | null
   status: string | null
+  shift_date: string | null
   created_at: string
 }
 
@@ -19,37 +20,104 @@ const STATUS_LANES = [
   { key: 'On-Hold', title: 'On-Hold', color: 'border-slate-400', header: 'bg-slate-100', icon: 'bg-slate-200 text-slate-800', count: 'bg-slate-200 text-slate-900' },
 ]
 
+const getPhilippineDate = (date: Date) => {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    second: 'numeric',
+    hour12: false,
+    hourCycle: 'h23',
+  }).formatToParts(date)
+
+  const getPart = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((part) => part.type === type)?.value || 0)
+
+  return new Date(
+    getPart('year'),
+    getPart('month') - 1,
+    getPart('day'),
+    getPart('hour'),
+    getPart('minute'),
+    getPart('second')
+  )
+}
+
+const getShiftDate = (date: Date) => {
+  const phDate = getPhilippineDate(date)
+  const shiftDate = new Date(phDate)
+
+  if (phDate.getHours() < 18) {
+    shiftDate.setDate(shiftDate.getDate() - 1)
+  }
+
+  return shiftDate
+}
+
+const getDateKey = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
+    date.getDate()
+  ).padStart(2, '0')}`
+
+const formatSelectedDate = (dateKey: string) => {
+  const [year, month, day] = dateKey.split('-').map(Number)
+
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(new Date(year, month - 1, day))
+}
+
 export default function AgentDashboardPage() {
   const { user } = useAuthStore()
   const [tickets, setTickets] = useState<TphTicket[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [isRefreshing, setIsRefreshing] = useState(false)
   const [error, setError] = useState('')
+  const [selectedShiftDate, setSelectedShiftDate] = useState(() => getDateKey(getShiftDate(new Date())))
 
-  useEffect(() => {
-    const loadTickets = async () => {
-      if (!user?.email) return
-
-      try {
-        setIsLoading(true)
-        setError('')
-
-        const { data, error: dbError } = await supabase
-          .from('tph')
-          .select('ticket_num, agent, status, created_at')
-          .eq('agent', user.email)
-
-        if (dbError) throw dbError
-
-        setTickets(data || [])
-      } catch (err: any) {
-        setError(err.message || 'Failed to load tickets')
-      } finally {
-        setIsLoading(false)
-      }
+  const loadTickets = useCallback(async (showFullLoader = false) => {
+    if (!user?.email) {
+      setTickets([])
+      setIsLoading(false)
+      setIsRefreshing(false)
+      return
     }
 
-    loadTickets()
-  }, [user?.email])
+    try {
+      if (showFullLoader) {
+        setIsLoading(true)
+      } else {
+        setIsRefreshing(true)
+      }
+
+      setError('')
+
+      const { data, error: dbError } = await supabase
+        .from('tph')
+        .select('ticket_num, agent, status, shift_date, created_at')
+        .eq('agent', user.email)
+        .eq('shift_date', selectedShiftDate)
+        .order('created_at', { ascending: false })
+
+      if (dbError) throw dbError
+
+      setTickets(data || [])
+    } catch (err: any) {
+      setError(err.message || 'Failed to load tickets')
+    } finally {
+      setIsLoading(false)
+      setIsRefreshing(false)
+    }
+  }, [selectedShiftDate, user?.email])
+
+  useEffect(() => {
+    loadTickets(true)
+  }, [loadTickets])
 
   const ticketsByStatus = (status: string) => 
     tickets.filter(t => t.status === status)
@@ -65,29 +133,51 @@ export default function AgentDashboardPage() {
     )
   }
 
-  if (error) {
-    return (
-      <div className="flex min-h-[400px] items-center justify-center rounded-lg border border-error/30 bg-error/10 p-6">
-        <div className="text-center">
-          <AlertCircle size={40} className="mx-auto mb-4 text-error" />
-          <p className="text-error">{error}</p>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="space-y-6 pb-8">
-      <div>
-        <p className="text-label-md font-semibold uppercase text-primary-container">
-          My Tickets
-        </p>
-        <h1 className="font-hanken text-headline-lg font-bold text-on-surface">
-          Your Assigned Tickets
-        </h1>
-        <p className="mt-2 max-w-2xl text-on-surface-variant">
-          View your tickets from the TPH table, organized by status.
-        </p>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <p className="text-label-md font-semibold uppercase text-primary-container">
+            My Tickets
+          </p>
+          <h1 className="font-hanken text-headline-lg font-bold text-on-surface">
+            Your Assigned Tickets
+          </h1>
+          <p className="mt-2 max-w-2xl text-on-surface-variant">
+            View your tickets from the TPH table for {formatSelectedDate(selectedShiftDate)}, organized by status.
+          </p>
+          {error && (
+            <p className="mt-2 text-sm font-medium text-error">{error}</p>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="relative flex min-h-11 items-center gap-2 rounded-lg border border-outline-variant bg-surface px-4 py-2 text-sm font-semibold text-on-surface shadow-sm transition hover:border-primary-container">
+            <CalendarDays size={18} className="text-primary-container" />
+            <span>Shift Date</span>
+            <input
+              type="date"
+              value={selectedShiftDate}
+              onChange={(event) => {
+                if (event.target.value) {
+                  setSelectedShiftDate(event.target.value)
+                }
+              }}
+              className="h-7 rounded border-none bg-transparent text-sm font-semibold text-on-surface outline-none"
+              aria-label="Select shift date"
+            />
+          </label>
+
+          <button
+            type="button"
+            onClick={() => loadTickets(false)}
+            disabled={isRefreshing}
+            className="flex min-h-11 items-center gap-2 rounded-lg bg-primary-container px-4 py-2 text-sm font-bold text-on-primary-container shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            <RefreshCw size={18} className={isRefreshing ? 'animate-spin' : ''} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
