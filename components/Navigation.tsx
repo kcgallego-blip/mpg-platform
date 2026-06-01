@@ -1,12 +1,13 @@
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/lib/authStore'
-import { LogOut, Settings, User, LayoutDashboard, Ticket, FileText, ChevronDown, ChevronRight, Users } from 'lucide-react'
+import { LogOut, Settings, User, LayoutDashboard, Ticket, FileText, ChevronDown, ChevronRight, Users, BarChart3 } from 'lucide-react'
 import { useState } from 'react'
 import Image from 'next/image'
 
 const allNavItems = [
   { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+  { href: '/dashboard/productivity', icon: BarChart3, label: 'Productivity' },
   {
     label: 'IT',
     icon: Ticket,
@@ -38,6 +39,7 @@ function getNavItemsByRole(role: string | null | undefined) {
     case 'Supervisor':
       return [
         { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+        { href: '/dashboard/productivity', icon: BarChart3, label: 'Productivity' },
         {
           label: 'IT',
           icon: Ticket,
@@ -51,6 +53,7 @@ function getNavItemsByRole(role: string | null | undefined) {
     case 'Team Leader':
       return [
         { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+        { href: '/dashboard/productivity', icon: BarChart3, label: 'Productivity' },
         {
           label: 'IT',
           icon: Ticket,

@@ -198,17 +198,20 @@ export type Database = {
           ticket_num: number
           agent: string | null
           status: string | null
+          shift_date: string | null
           created_at: string
         }
         Insert: {
           ticket_num: number
           agent?: string | null
           status?: string | null
+          shift_date?: string | null
           created_at?: string
         }
         Update: {
           agent?: string | null
           status?: string | null
+          shift_date?: string | null
         }
       }
     }
