@@ -75,25 +75,46 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(new URL('/login?error=no_email', request.url))
     }
 
-    // Upsert user in database
-    const { error: dbError } = await supabase
+    const now = new Date().toISOString()
+
+    const { data: existingUser, error: existingUserError } = await supabase
       .from('users')
-      .upsert([
-        {
+      .select('email, role, access, registered_at')
+      .eq('email', email)
+      .maybeSingle()
+
+    if (existingUserError) {
+      console.error('Database user lookup error:', existingUserError)
+      return NextResponse.redirect(new URL('/login?error=db_error', request.url))
+    }
+
+    const { error: dbError } = existingUser
+      ? await supabase
+        .from('users')
+        .update({
+          name,
+          token: accessToken,
+          avatar_image: avatar,
+          is_active: true,
+          last_login: now,
+        })
+        .eq('email', email)
+      : await supabase
+        .from('users')
+        .insert({
           email,
           name,
           token: accessToken,
           avatar_image: avatar,
           is_active: true,
-          registered_at: new Date().toISOString(),
-          last_login: new Date().toISOString(),
-          role: null,
+          registered_at: now,
+          last_login: now,
+          role: 'Agent',
           access: null,
-        },
-      ])
+        })
 
     if (dbError) {
-      console.error('Database upsert error:', dbError)
+      console.error('Database auth user save error:', dbError)
       return NextResponse.redirect(new URL('/login?error=db_error', request.url))
     }
 

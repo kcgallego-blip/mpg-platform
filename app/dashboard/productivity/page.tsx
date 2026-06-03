@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { BarChart3, CalendarDays, Clock3, Loader2, RefreshCw, ShieldAlert, Table2 } from 'lucide-react'
+import { ArrowDownUp, BarChart3, CalendarDays, Clock3, Loader2, RefreshCw, ShieldAlert, Table2 } from 'lucide-react'
 import { useAuthStore } from '@/lib/authStore'
 import { supabase } from '@/lib/supabase'
 
@@ -27,10 +27,25 @@ type AgentProductivity = {
   total: number
   statusCounts: Record<string, number>
   hourlyCounts: Record<string, number>
+  firstTicketTime: string | null
+  latestTicketTime: string | null
+  shiftDuration: string
+  shiftDurationMs: number
+}
+
+type SortedAgentSummary = {
+  email: string
+  name: string
+  totalTickets: number
+  firstTicketTime: string | null
+  latestTicketTime: string | null
+  shiftDuration: string
+  shiftDurationMs: number
 }
 
 const ALLOWED_ROLES = ['Admin', 'Supervisor', 'Operations Manager', 'Team Leader']
 const STATUS_COLUMNS = ['Open', 'Pending', 'Solved', 'On-Hold']
+const STATUS_FILTERS = ['All', ...STATUS_COLUMNS]
 
 const getPhilippineDate = (date: Date) => {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -98,6 +113,25 @@ const getHourKeyFromTimestamp = (timestamp: string) => {
   return String(phDate.getHours()).padStart(2, '0')
 }
 
+const formatTicketTime = (timestamp: string | null) => {
+  if (!timestamp) return '-'
+
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Manila',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }).format(new Date(timestamp))
+}
+
+const formatDuration = (durationMs: number) => {
+  const totalMinutes = Math.floor(durationMs / (60 * 1000))
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+
+  return `${hours}h ${minutes}m`
+}
+
 const hourSlots = Array.from({ length: 18 }, (_, index) => {
   const hour = (18 + index) % 24
   const label = new Intl.DateTimeFormat('en-US', {
@@ -117,10 +151,13 @@ export default function ProductivityPage() {
   const [tickets, setTickets] = useState<TphTicket[]>([])
   const [userNames, setUserNames] = useState<Record<string, string>>({})
   const [selectedShiftDate, setSelectedShiftDate] = useState(() => getDateKey(getShiftDate(new Date())))
+  const [selectedStatus, setSelectedStatus] = useState('All')
   const [view, setView] = useState<ProductivityView>('status')
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [isSorting, setIsSorting] = useState(false)
   const [error, setError] = useState('')
+  const [sortedAgentSummaries, setSortedAgentSummaries] = useState<SortedAgentSummary[]>([])
 
   const currentShiftDate = useMemo(() => getDateKey(getShiftDate(new Date())), [])
   const isAllowed = !!user?.role && ALLOWED_ROLES.includes(user.role)
@@ -147,11 +184,17 @@ export default function ProductivityPage() {
 
       setError('')
 
-      const { data: tphData, error: tphError } = await supabase
+      let tphQuery = supabase
         .from('tph')
         .select('ticket_num, agent, status, shift_date, created_at')
         .eq('shift_date', selectedShiftDate)
         .order('created_at', { ascending: true })
+
+      if (selectedStatus !== 'All') {
+        tphQuery = tphQuery.ilike('status', selectedStatus)
+      }
+
+      const { data: tphData, error: tphError } = await tphQuery
 
       if (tphError) throw tphError
 
@@ -186,39 +229,127 @@ export default function ProductivityPage() {
       setIsLoading(false)
       setIsRefreshing(false)
     }
-  }, [isAllowed, selectedShiftDate])
+  }, [isAllowed, selectedShiftDate, selectedStatus])
 
   useEffect(() => {
     loadProductivity(true)
   }, [loadProductivity])
 
+  useEffect(() => {
+    setSortedAgentSummaries([])
+  }, [selectedShiftDate, selectedStatus])
+
+  const sortProductivity = useCallback(async () => {
+    try {
+      setIsSorting(true)
+      setError('')
+
+      const params = new URLSearchParams({
+        shiftDate: selectedShiftDate,
+        status: selectedStatus,
+      })
+
+      const response = await fetch(`/api/productivity/sorted?${params.toString()}`, {
+        cache: 'no-store',
+      })
+      const data = (await response.json()) as {
+        agents?: SortedAgentSummary[]
+        error?: string
+      }
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Unable to sort productivity data')
+      }
+
+      setSortedAgentSummaries(data.agents || [])
+    } catch (err: any) {
+      setError(err.message || 'Unable to sort productivity data')
+    } finally {
+      setIsSorting(false)
+    }
+  }, [selectedShiftDate, selectedStatus])
+
   const productivityRows = useMemo(() => {
     const rowsByEmail = new Map<string, AgentProductivity>()
+    const sortedSummaryByEmail = new Map(sortedAgentSummaries.map((summary) => [summary.email, summary]))
 
     tickets.forEach((ticket) => {
       if (!ticket.agent) return
 
       const existingRow = rowsByEmail.get(ticket.agent)
+      const sortedSummary = sortedSummaryByEmail.get(ticket.agent)
       const row = existingRow || {
         email: ticket.agent,
-        name: userNames[ticket.agent] || getEmailFallbackName(ticket.agent),
+        name: sortedSummary?.name || userNames[ticket.agent] || getEmailFallbackName(ticket.agent),
         total: 0,
         statusCounts: {},
         hourlyCounts: {},
+        firstTicketTime: null,
+        latestTicketTime: null,
+        shiftDuration: '0h 0m',
+        shiftDurationMs: 0,
       }
 
       const status = ticket.status || 'No Status'
       const hourKey = getHourKeyFromTimestamp(ticket.created_at)
+      const createdAtTime = Date.parse(ticket.created_at)
+      const firstTime = row.firstTicketTime ? Date.parse(row.firstTicketTime) : createdAtTime
+      const latestTime = row.latestTicketTime ? Date.parse(row.latestTicketTime) : createdAtTime
 
       row.total += 1
       row.statusCounts[status] = (row.statusCounts[status] || 0) + 1
       row.hourlyCounts[hourKey] = (row.hourlyCounts[hourKey] || 0) + 1
 
+      if (!row.firstTicketTime || createdAtTime < firstTime) {
+        row.firstTicketTime = ticket.created_at
+      }
+
+      if (!row.latestTicketTime || createdAtTime > latestTime) {
+        row.latestTicketTime = ticket.created_at
+      }
+
       rowsByEmail.set(ticket.agent, row)
     })
 
-    return Array.from(rowsByEmail.values()).sort((first, second) => first.name.localeCompare(second.name))
-  }, [tickets, userNames])
+    const rows = Array.from(rowsByEmail.values()).map((row) => {
+      const sortedSummary = sortedSummaryByEmail.get(row.email)
+
+      if (sortedSummary) {
+        return {
+          ...row,
+          name: sortedSummary.name,
+          firstTicketTime: sortedSummary.firstTicketTime,
+          latestTicketTime: sortedSummary.latestTicketTime,
+          shiftDuration: sortedSummary.shiftDuration,
+          shiftDurationMs: sortedSummary.shiftDurationMs,
+        }
+      }
+
+      const firstTime = row.firstTicketTime ? Date.parse(row.firstTicketTime) : 0
+      const latestTime = row.latestTicketTime ? Date.parse(row.latestTicketTime) : 0
+      const shiftDurationMs = Math.max(latestTime - firstTime, 0)
+
+      return {
+        ...row,
+        shiftDurationMs,
+        shiftDuration: formatDuration(shiftDurationMs),
+      }
+    })
+
+    if (sortedAgentSummaries.length > 0) {
+      const sortedPositionByEmail = new Map(
+        sortedAgentSummaries.map((summary, index) => [summary.email, index])
+      )
+
+      return rows.sort((first, second) => {
+        const firstPosition = sortedPositionByEmail.get(first.email) ?? Number.MAX_SAFE_INTEGER
+        const secondPosition = sortedPositionByEmail.get(second.email) ?? Number.MAX_SAFE_INTEGER
+        return firstPosition - secondPosition
+      })
+    }
+
+    return rows.sort((first, second) => first.name.localeCompare(second.name))
+  }, [sortedAgentSummaries, tickets, userNames])
 
   const totals = useMemo(() => {
     return productivityRows.reduce(
@@ -274,6 +405,7 @@ export default function ProductivityPage() {
           </h1>
           <p className="mt-2 max-w-3xl text-on-surface-variant">
             Ticket counts from the TPH table for {formatDateKey(selectedShiftDate)}. Current shift date is {formatDateKey(currentShiftDate)}.
+            {sortedAgentSummaries.length > 0 && ' Sorted by lowest ticket count, then longest duration.'}
           </p>
           {error && (
             <p className="mt-2 text-sm font-medium text-error">{error}</p>
@@ -295,6 +427,22 @@ export default function ProductivityPage() {
               className="h-7 rounded border-none bg-transparent text-sm font-semibold text-on-surface outline-none"
               aria-label="Select shift date"
             />
+          </label>
+
+          <label className="flex min-h-11 items-center gap-2 rounded-lg border border-outline-variant bg-surface px-4 py-2 text-sm font-semibold text-on-surface shadow-sm transition hover:border-primary-container">
+            <span>Status</span>
+            <select
+              value={selectedStatus}
+              onChange={(event) => setSelectedStatus(event.target.value)}
+              className="h-7 rounded border-none bg-transparent text-sm font-semibold text-on-surface outline-none"
+              aria-label="Filter by status"
+            >
+              {STATUS_FILTERS.map((status) => (
+                <option key={status} value={status}>
+                  {status}
+                </option>
+              ))}
+            </select>
           </label>
 
           <div className="flex rounded-lg border border-outline-variant bg-surface p-1 shadow-sm">
@@ -328,6 +476,16 @@ export default function ProductivityPage() {
           >
             <RefreshCw size={18} className={isRefreshing ? 'animate-spin' : ''} />
             Refresh
+          </button>
+
+          <button
+            type="button"
+            onClick={sortProductivity}
+            disabled={isSorting}
+            className="flex min-h-11 items-center gap-2 rounded-lg border border-primary-container bg-surface px-4 py-2 text-sm font-bold text-primary-container shadow-sm transition hover:bg-primary-container/10 disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            <ArrowDownUp size={18} className={isSorting ? 'animate-pulse' : ''} />
+            Sort
           </button>
         </div>
       </div>
@@ -363,6 +521,9 @@ export default function ProductivityPage() {
                     </th>
                   ))}
                   <th className="px-4 py-3 text-center text-label-md font-bold uppercase text-on-surface-variant">Total</th>
+                  <th className="px-4 py-3 text-center text-label-md font-bold uppercase text-on-surface-variant">First</th>
+                  <th className="px-4 py-3 text-center text-label-md font-bold uppercase text-on-surface-variant">Latest</th>
+                  <th className="px-4 py-3 text-center text-label-md font-bold uppercase text-on-surface-variant">Duration</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-outline-variant/50">
@@ -378,6 +539,9 @@ export default function ProductivityPage() {
                       </td>
                     ))}
                     <td className="px-4 py-3 text-center text-sm font-bold text-primary-container">{row.total}</td>
+                    <td className="px-4 py-3 text-center text-sm font-semibold text-on-surface">{formatTicketTime(row.firstTicketTime)}</td>
+                    <td className="px-4 py-3 text-center text-sm font-semibold text-on-surface">{formatTicketTime(row.latestTicketTime)}</td>
+                    <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">{row.shiftDuration}</td>
                   </tr>
                 ))}
                 {productivityRows.length > 0 && (
@@ -389,6 +553,9 @@ export default function ProductivityPage() {
                       </td>
                     ))}
                     <td className="px-4 py-3 text-center text-sm font-bold text-primary-container">{totals.tickets}</td>
+                    <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">-</td>
+                    <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">-</td>
+                    <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">-</td>
                   </tr>
                 )}
               </tbody>
@@ -399,11 +566,14 @@ export default function ProductivityPage() {
                 <tr>
                   <th className="sticky left-0 z-10 bg-surface-container px-4 py-3 text-left text-label-md font-bold uppercase text-on-surface-variant">Agent</th>
                   {hourSlots.map((hour) => (
-                    <th key={hour.key} className="min-w-16 px-3 py-3 text-center text-label-md font-bold uppercase text-on-surface-variant">
+                    <th key={hour.key} className="min-w-20 px-4 py-3 text-center text-label-md font-bold uppercase text-on-surface-variant">
                       {hour.label}
                     </th>
                   ))}
-                  <th className="min-w-16 px-3 py-3 text-center text-label-md font-bold uppercase text-on-surface-variant">Total</th>
+                  <th className="min-w-20 px-4 py-3 text-center text-label-md font-bold uppercase text-on-surface-variant">Total</th>
+                  <th className="min-w-24 px-4 py-3 text-center text-label-md font-bold uppercase text-on-surface-variant">First</th>
+                  <th className="min-w-24 px-4 py-3 text-center text-label-md font-bold uppercase text-on-surface-variant">Latest</th>
+                  <th className="min-w-24 px-4 py-3 text-center text-label-md font-bold uppercase text-on-surface-variant">Duration</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-outline-variant/50">
@@ -414,24 +584,28 @@ export default function ProductivityPage() {
                       <p className="text-xs text-on-surface-variant">{row.email}</p>
                     </td>
                     {hourSlots.map((hour) => (
-                      <td key={hour.key} className="px-3 py-3 text-center">
-                        <span className="inline-flex h-8 min-w-8 items-center justify-center rounded-md bg-surface-container px-2 text-sm font-bold text-on-surface">
-                          {row.hourlyCounts[hour.key] || 0}
-                        </span>
+                      <td key={hour.key} className="px-4 py-3 text-center text-sm font-semibold text-on-surface">
+                        {row.hourlyCounts[hour.key] || 0}
                       </td>
                     ))}
-                    <td className="px-3 py-3 text-center text-sm font-bold text-primary-container">{row.total}</td>
+                    <td className="px-4 py-3 text-center text-sm font-bold text-primary-container">{row.total}</td>
+                    <td className="px-4 py-3 text-center text-sm font-semibold text-on-surface">{formatTicketTime(row.firstTicketTime)}</td>
+                    <td className="px-4 py-3 text-center text-sm font-semibold text-on-surface">{formatTicketTime(row.latestTicketTime)}</td>
+                    <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">{row.shiftDuration}</td>
                   </tr>
                 ))}
                 {productivityRows.length > 0 && (
                   <tr className="bg-surface-container/70">
                     <td className="sticky left-0 z-10 bg-surface-container px-4 py-3 font-bold text-on-surface">Total</td>
                     {hourSlots.map((hour) => (
-                      <td key={hour.key} className="px-3 py-3 text-center text-sm font-bold text-on-surface">
+                      <td key={hour.key} className="px-4 py-3 text-center text-sm font-bold text-on-surface">
                         {totals.hourlyCounts[hour.key] || 0}
                       </td>
                     ))}
-                    <td className="px-3 py-3 text-center text-sm font-bold text-primary-container">{totals.tickets}</td>
+                    <td className="px-4 py-3 text-center text-sm font-bold text-primary-container">{totals.tickets}</td>
+                    <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">-</td>
+                    <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">-</td>
+                    <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">-</td>
                   </tr>
                 )}
               </tbody>

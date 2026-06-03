@@ -13,6 +13,7 @@ create table if not exists public.users (
   email text unique not null,
   company text,
   name text,
+  role text default 'Agent',
   avatar_url text,
   phone text,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
@@ -155,8 +156,8 @@ create trigger update_reports_updated_at
 create or replace function handle_new_user()
 returns trigger as $$
 begin
-  insert into public.users (id, email, name)
-  values (new.id, new.email, new.raw_user_meta_data ->> 'name');
+  insert into public.users (id, email, name, role)
+  values (new.id, new.email, new.raw_user_meta_data ->> 'name', 'Agent');
   return new;
 end;
 $$ language plpgsql security definer;

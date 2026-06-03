@@ -19,7 +19,7 @@ interface AuthStore {
   loading: boolean
   error: string | null
   loginWithWebex: () => Promise<void>
-  register: (email: string, password: string, metadata?: { name?: string; company?: string }) => Promise<void>
+  register: (email: string) => Promise<void>
   logout: () => Promise<void>
   checkAuth: () => Promise<void>
 }
@@ -29,7 +29,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
   loading: false,
   error: null,
 
-  register: async (email: string, password: string, metadata?: { name?: string; company?: string }) => {
+  register: async (email: string) => {
     try {
       set({ loading: true, error: null })
 
@@ -37,7 +37,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
       const response = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, ...metadata }),
+        body: JSON.stringify({ email }),
       })
 
       if (!response.ok) {
@@ -52,6 +52,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
           email: userData.email,
           name: userData.name,
           avatar_image: userData.avatar_image,
+          role: userData.role,
           token: userData.token,
         },
         loading: false,

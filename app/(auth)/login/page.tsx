@@ -2,8 +2,9 @@
 
 import { useEffect, useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
+import Link from 'next/link'
 import { useAuthStore } from '@/lib/authStore'
-import { LogOut } from 'lucide-react'
+import { LogOut, UserPlus } from 'lucide-react'
 import Image from 'next/image'
 
 function LoginPageContent() {
@@ -108,6 +109,14 @@ function LoginPageContent() {
           <LogOut size={18} />
           {isLoading ? 'Connecting...' : 'Continue with Webex'}
         </button>
+
+        <Link
+          href="/register"
+          className="mt-3 flex w-full items-center justify-center gap-2 rounded-DEFAULT border border-outline-variant/60 bg-surface/70 py-sm text-sm font-medium text-on-surface transition-all hover:border-primary hover:bg-surface-container-high"
+        >
+          <UserPlus size={18} />
+          Register without Webex
+        </Link>
       </div>
     </div>
   )
