@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import { supabase } from './supabase'
 
+const AUTH_STORAGE_KEY = 'mpg_auth_user'
+
 export interface User {
   email: string
   name: string
@@ -22,12 +24,41 @@ interface AuthStore {
   register: (email: string) => Promise<void>
   logout: () => Promise<void>
   checkAuth: () => Promise<void>
+  rehydrateFromStorage: () => void
+}
+
+const persistUserToStorage = (user: User | null) => {
+  if (typeof window === 'undefined') return
+  
+  if (user) {
+    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user))
+  } else {
+    localStorage.removeItem(AUTH_STORAGE_KEY)
+  }
+}
+
+const getUserFromStorage = (): User | null => {
+  if (typeof window === 'undefined') return null
+  
+  try {
+    const stored = localStorage.getItem(AUTH_STORAGE_KEY)
+    return stored ? JSON.parse(stored) : null
+  } catch {
+    return null
+  }
 }
 
 export const useAuthStore = create<AuthStore>((set) => ({
   user: null,
   loading: false,
   error: null,
+
+  rehydrateFromStorage: () => {
+    const storedUser = getUserFromStorage()
+    if (storedUser) {
+      set({ user: storedUser })
+    }
+  },
 
   register: async (email: string) => {
     try {
@@ -46,17 +77,20 @@ export const useAuthStore = create<AuthStore>((set) => ({
       }
 
       const userData = await response.json()
+      const user = {
+        email: userData.email,
+        name: userData.name,
+        avatar_image: userData.avatar_image,
+        role: userData.role,
+        token: userData.token,
+      }
 
       set({
-        user: {
-          email: userData.email,
-          name: userData.name,
-          avatar_image: userData.avatar_image,
-          role: userData.role,
-          token: userData.token,
-        },
+        user,
         loading: false,
       })
+      
+      persistUserToStorage(user)
     } catch (error: any) {
       set({ error: error.message, loading: false })
       throw error
@@ -95,6 +129,7 @@ export const useAuthStore = create<AuthStore>((set) => ({
 
       // Clear localStorage
       localStorage.removeItem('webex_oauth_state')
+      persistUserToStorage(null)
 
       set({
         user: null,
@@ -115,27 +150,33 @@ export const useAuthStore = create<AuthStore>((set) => ({
 
       if (response.ok) {
         const userData = await response.json()
-        set({
-          user: {
-            email: userData.email,
+        const user = {
+          email: userData.email,
+          name: userData.name,
+          avatar_image: userData.avatar_image,
+          role: userData.role,
+          token: userData.token,
+          user_metadata: {
             name: userData.name,
+            company: userData.company,
             avatar_image: userData.avatar_image,
-            role: userData.role,
-            token: userData.token,
-            user_metadata: {
-              name: userData.name,
-              company: userData.company,
-              avatar_image: userData.avatar_image,
-            },
           },
+        }
+        
+        set({
+          user,
           loading: false,
         })
+        
+        persistUserToStorage(user)
       } else {
         set({ user: null, loading: false })
+        persistUserToStorage(null)
       }
     } catch (error: any) {
       // Don't set error for 401 (not logged in)
       set({ user: null, loading: false })
+      persistUserToStorage(null)
     }
   },
 }))

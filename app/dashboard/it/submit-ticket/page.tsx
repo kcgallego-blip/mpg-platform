@@ -344,7 +344,7 @@ export default function ITReportPage() {
               className="w-5 h-5 mt-0.5 rounded border-outline-variant/50 text-primary focus:ring-2 focus:ring-primary/20 transition-all"
             />
             <span className="text-on-surface group-hover:text-primary transition-colors">
-              Is the issue affecting your Five9 login hours?
+              Is the issue affecting the agent's Five9 login hours?
             </span>
           </label>
         </div>

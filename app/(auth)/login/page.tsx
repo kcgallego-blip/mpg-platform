@@ -10,7 +10,7 @@ import Image from 'next/image'
 function LoginPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const { user, checkAuth, loginWithWebex } = useAuthStore()
+  const { user, checkAuth, loginWithWebex, rehydrateFromStorage } = useAuthStore()
   const [isLoading, setIsLoading] = useState(false)
   const [isCheckingAuth, setIsCheckingAuth] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -18,6 +18,10 @@ function LoginPageContent() {
   useEffect(() => {
     const verifyAuth = async () => {
       try {
+        // First rehydrate from local storage
+        rehydrateFromStorage()
+        
+        // Then verify with server
         await checkAuth()
         setIsCheckingAuth(false)
       } catch (err) {
@@ -26,7 +30,7 @@ function LoginPageContent() {
     }
 
     verifyAuth()
-  }, [checkAuth])
+  }, [checkAuth, rehydrateFromStorage])
 
   // Check for error from callback
   useEffect(() => {

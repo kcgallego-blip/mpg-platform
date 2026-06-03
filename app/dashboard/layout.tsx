@@ -7,11 +7,18 @@ import Navigation from '@/components/Navigation'
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const router = useRouter()
-  const { user, loading, checkAuth } = useAuthStore()
+  const { user, loading, checkAuth, rehydrateFromStorage } = useAuthStore()
 
   useEffect(() => {
-    checkAuth()
-  }, [checkAuth])
+    const initAuth = async () => {
+      // First rehydrate from local storage
+      rehydrateFromStorage()
+      // Then verify with server
+      await checkAuth()
+    }
+    
+    initAuth()
+  }, [checkAuth, rehydrateFromStorage])
 
   useEffect(() => {
     if (!loading && !user) {
