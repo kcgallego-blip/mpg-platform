@@ -1110,7 +1110,7 @@ export default function ITReportsPage() {
           <div className="bg-surface rounded-xl p-6 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
             <h3 className="font-hanken text-headline-md font-bold text-on-surface mb-2">Finalize Troubleshooting?</h3>
             <p className="text-on-surface-variant mb-4">
-              This will mark the ticket as Resolved and set the end time to current time.
+              This will mark the ticket as Resolved and set the end time to {tempEndTimeHour}:{tempEndTimeMinute} {tempEndTimeAMPM}.
             </p>
             <div className="flex gap-2">
               <button
