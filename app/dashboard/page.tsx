@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { CalendarDays, Clock, LogIn, LogOut, UserX, Users } from 'lucide-react'
+import { CalendarDays, Clock, LogIn, LogOut, UserX, Users, Grid3x3, Table2 } from 'lucide-react'
 import { useAuthStore } from '@/lib/authStore'
 import { useRouter } from 'next/navigation'
 
@@ -200,11 +200,12 @@ export default function DashboardPage() {
 
   const [agents, setAgents] = useState<ScheduleAgent[]>([])
   const [supervisors, setSupervisors] = useState<string[]>([])
-  const [selectedSupervisor, setSelectedSupervisor] = useState('')
+  const [selectedSupervisors, setSelectedSupervisors] = useState<string[]>([])
   const [absentAgentIds, setAbsentAgentIds] = useState<string[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
   const [now, setNow] = useState(() => new Date())
+  const [viewType, setViewType] = useState<'kanban' | 'table'>('kanban')
 
   const loadSchedule = useCallback(async (showLoading = false) => {
     try {
@@ -226,7 +227,7 @@ export default function DashboardPage() {
 
       setAgents(nextAgents)
       setSupervisors(nextSupervisors)
-      setSelectedSupervisor((current) => current || nextSupervisors[0] || '')
+      setSelectedSupervisors((current) => current.length > 0 ? current : nextSupervisors)
     } catch (loadError: any) {
       setError(loadError.message || 'Unable to load schedule')
     } finally {
@@ -263,8 +264,8 @@ export default function DashboardPage() {
   }, [loadSchedule])
 
   const selectedAgents = useMemo(
-    () => agents.filter((agent) => agent.supervisor === selectedSupervisor),
-    [agents, selectedSupervisor]
+    () => agents.filter((agent) => selectedSupervisors.includes(agent.supervisor)),
+    [agents, selectedSupervisors]
   )
 
   const currentShift = useMemo(() => getCurrentShiftInfo(now), [now])
@@ -449,21 +450,69 @@ export default function DashboardPage() {
           </p>
         </div>
 
-        <label className="flex w-full flex-col gap-2 sm:max-w-xs">
-          <span className="text-label-md font-semibold text-on-surface">Team leader</span>
-          <select
-            value={selectedSupervisor}
-            onChange={(event) => setSelectedSupervisor(event.target.value)}
-            disabled={isLoading || supervisors.length === 0}
-            className="h-12 rounded-lg border border-outline-variant bg-surface px-4 text-on-surface shadow-sm outline-none transition focus:border-primary-container focus:ring-2 focus:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {supervisors.map((supervisor) => (
-              <option key={supervisor} value={supervisor}>
-                {supervisor}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="flex w-full flex-col gap-4 sm:flex-row sm:items-end sm:gap-4">
+          <div className="flex flex-col gap-2">
+            <span className="text-label-md font-semibold text-on-surface">Team leaders</span>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => setSelectedSupervisors(supervisors)}
+                className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                  selectedSupervisors.length === supervisors.length
+                    ? 'bg-primary-container text-on-primary-container'
+                    : 'border border-outline-variant bg-surface text-on-surface hover:border-primary-container'
+                }`}
+                disabled={isLoading || supervisors.length === 0}
+              >
+                All
+              </button>
+              {supervisors.map((supervisor) => (
+                <button
+                  key={supervisor}
+                  onClick={() => {
+                    setSelectedSupervisors((current) =>
+                      current.includes(supervisor)
+                        ? current.filter((s) => s !== supervisor)
+                        : [...current, supervisor]
+                    )
+                  }}
+                  className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                    selectedSupervisors.includes(supervisor)
+                      ? 'bg-primary-container text-on-primary-container'
+                      : 'border border-outline-variant bg-surface text-on-surface hover:border-primary-container'
+                  }`}
+                  disabled={isLoading}
+                >
+                  {supervisor}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setViewType('kanban')}
+              className={`rounded-lg p-2 transition ${
+                viewType === 'kanban'
+                  ? 'bg-primary-container text-on-primary-container'
+                  : 'border border-outline-variant text-on-surface hover:border-primary-container'
+              }`}
+              title="Kanban view"
+            >
+              <Grid3x3 size={20} />
+            </button>
+            <button
+              onClick={() => setViewType('table')}
+              className={`rounded-lg p-2 transition ${
+                viewType === 'table'
+                  ? 'bg-primary-container text-on-primary-container'
+                  : 'border border-outline-variant text-on-surface hover:border-primary-container'
+              }`}
+              title="Table view"
+            >
+              <Table2 size={20} />
+            </button>
+          </div>
+        </div>
       </div>
 
       {error && (
@@ -485,10 +534,14 @@ export default function DashboardPage() {
         <div className="glass-effect rounded-lg p-5 backdrop-blur-glass-lg">
           <div className="flex items-center gap-3 text-on-surface-variant">
             <CalendarDays size={20} />
-            <span className="text-label-md font-semibold uppercase">Team Leader</span>
+            <span className="text-label-md font-semibold uppercase">Team Leaders</span>
           </div>
           <p className="mt-3 truncate font-hanken text-headline-md font-bold text-on-surface">
-            {selectedSupervisor || 'None'}
+            {selectedSupervisors.length === 0
+              ? 'None'
+              : selectedSupervisors.length === supervisors.length
+                ? 'All'
+                : selectedSupervisors.join(', ')}
           </p>
         </div>
         <div className="glass-effect rounded-lg p-5 backdrop-blur-glass-lg">
@@ -509,7 +562,7 @@ export default function DashboardPage() {
             <p className="text-on-surface-variant">Loading schedule...</p>
           </div>
         </div>
-      ) : (
+      ) : viewType === 'kanban' ? (
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
           {lanes.map((lane) => (
             <section
@@ -585,6 +638,112 @@ export default function DashboardPage() {
               </div>
             </section>
           ))}
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-outline-variant/60 bg-surface">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-outline-variant/60 bg-surface-variant/40">
+                <th className="px-6 py-3 text-left text-label-md font-semibold text-on-surface">
+                  Agent Name
+                </th>
+                <th className="px-6 py-3 text-left text-label-md font-semibold text-on-surface">
+                  Role
+                </th>
+                <th className="px-6 py-3 text-left text-label-md font-semibold text-on-surface">
+                  Team Leader
+                </th>
+                <th className="px-6 py-3 text-left text-label-md font-semibold text-on-surface">
+                  Shift In
+                </th>
+                <th className="px-6 py-3 text-left text-label-md font-semibold text-on-surface">
+                  Shift Out
+                </th>
+                <th className="px-6 py-3 text-left text-label-md font-semibold text-on-surface">
+                  Days Off
+                </th>
+                <th className="px-6 py-3 text-left text-label-md font-semibold text-on-surface">
+                  Status
+                </th>
+                <th className="px-6 py-3 text-left text-label-md font-semibold text-on-surface">
+                  Action
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {boardAgents.length > 0 ? (
+                boardAgents.map((agent) => {
+                  const statusColors = {
+                    notLoggedIn: 'bg-slate-100 text-slate-700',
+                    loggedIn: 'bg-emerald-100 text-emerald-700',
+                    loggedOut: 'bg-amber-100 text-amber-700',
+                    off: 'bg-sky-100 text-sky-700',
+                    absent: 'bg-red-100 text-red-700',
+                  }
+
+                  return (
+                    <tr
+                      key={agent.id}
+                      className="border-b border-outline-variant/30 hover:bg-surface-variant/40 transition"
+                    >
+                      <td className="px-6 py-4">
+                        <p className="font-semibold text-on-surface">{agent.name}</p>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="rounded-full bg-indigo-100 px-2.5 py-1 text-label-sm font-semibold text-indigo-700">
+                          {agent.role}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-on-surface">{agent.supervisor}</td>
+                      <td className="px-6 py-4 text-on-surface">{agent.startShift}</td>
+                      <td className="px-6 py-4 text-on-surface">{agent.endShift}</td>
+                      <td className="px-6 py-4 text-on-surface">
+                        {agent.dayOff1}, {agent.dayOff2}
+                      </td>
+                      <td className="px-6 py-4">
+                        <span
+                          className={`rounded-full px-3 py-1 text-label-sm font-semibold ${
+                            statusColors[agent.status]
+                          }`}
+                        >
+                          {agent.status === 'notLoggedIn'
+                            ? 'Not Logged In'
+                            : agent.status === 'loggedIn'
+                              ? 'Logged In'
+                              : agent.status === 'loggedOut'
+                                ? 'Logged Out'
+                                : agent.status === 'off'
+                                  ? 'Off'
+                                  : 'Absent'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <button
+                          onClick={() => handleAgentCardClick(agent)}
+                          className={`rounded-lg px-3 py-1 text-sm font-semibold transition ${
+                            agent.status === 'off'
+                              ? 'cursor-default opacity-50'
+                              : agent.status === 'absent'
+                                ? 'bg-red-100 text-red-700 hover:bg-red-200'
+                                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                          }`}
+                          disabled={agent.status === 'off'}
+                        >
+                          {agent.status === 'absent' ? 'Remove' : 'Mark'}
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })
+              ) : (
+                <tr>
+                  <td colSpan={8} className="px-6 py-8 text-center text-on-surface-variant">
+                    No agents to display
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
