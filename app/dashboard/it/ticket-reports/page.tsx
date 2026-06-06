@@ -76,6 +76,38 @@ function parseTime(value: string): string {
   return value
 }
 
+// Convert 24-hour time to 12-hour format with AM/PM
+function convertTo12Hour(timeStr: string | null): { hour: string; minute: string; ampm: string } {
+  if (!timeStr || !/^\d{2}:\d{2}$/.test(timeStr)) {
+    const now = new Date()
+    const hour = now.getHours()
+    const minute = now.getMinutes()
+    return convertHourMinuteTo12Hour(hour, minute)
+  }
+  const [hourStr, minuteStr] = timeStr.split(':')
+  const hour = parseInt(hourStr)
+  const minute = parseInt(minuteStr)
+  return convertHourMinuteTo12Hour(hour, minute)
+}
+
+function convertHourMinuteTo12Hour(hour: number, minute: number): { hour: string; minute: string; ampm: string } {
+  const ampm = hour >= 12 ? 'PM' : 'AM'
+  const hour12 = hour % 12 || 12
+  return {
+    hour: hour12.toString().padStart(2, '0'),
+    minute: minute.toString().padStart(2, '0'),
+    ampm
+  }
+}
+
+// Convert 12-hour format with AM/PM to 24-hour HH:MM
+function convertTo24Hour(hour: string, minute: string, ampm: string): string {
+  let hour24 = parseInt(hour)
+  if (ampm === 'PM' && hour24 !== 12) hour24 += 12
+  if (ampm === 'AM' && hour24 === 12) hour24 = 0
+  return `${hour24.toString().padStart(2, '0')}:${minute.padStart(2, '0')}`
+}
+
 export default function ITReportsPage() {
   const router = useRouter()
   const [viewMode, setViewMode] = useState<ViewMode>('it-issues')
@@ -109,6 +141,9 @@ export default function ITReportsPage() {
   const [tempEndTime, setTempEndTime] = useState('')
   const [tempTroubleshooting, setTempTroubleshooting] = useState('')
   const [tempAssistedBy, setTempAssistedBy] = useState('')
+  const [tempEndTimeHour, setTempEndTimeHour] = useState('')
+  const [tempEndTimeMinute, setTempEndTimeMinute] = useState('')
+  const [tempEndTimeAMPM, setTempEndTimeAMPM] = useState<'AM' | 'PM'>('AM')
 
   // Assisted By options
   const assistedByOptions = [
@@ -286,6 +321,10 @@ export default function ITReportsPage() {
   const startEditTroubleshooting = (ticket: Ticket) => {
     setEditingTroubleshooting(ticket.ticketid)
     setTempTroubleshooting(ticket.troubleshooting || '')
+    const timeData = convertTo12Hour(ticket.end_time)
+    setTempEndTimeHour(timeData.hour)
+    setTempEndTimeMinute(timeData.minute)
+    setTempEndTimeAMPM(timeData.ampm as 'AM' | 'PM')
   }
 
   const handleAssistedBySave = async (ticketId: number, webexMessageId?: string | null) => {
@@ -347,6 +386,9 @@ export default function ITReportsPage() {
      } else {
        console.warn('No Webex Message ID for ticket:', ticketId)
      }
+     
+     // Close the modal after successful save and refresh
+     setSelectedTicket(null)
    } catch (err) {
      console.error('Error updating assisted_by:', err)
      alert('Failed to update assisted by')
@@ -396,10 +438,8 @@ export default function ITReportsPage() {
       const updates: Partial<Ticket> = { troubleshooting: tempTroubleshooting }
       const ticket = tickets.find(t => t.ticketid === ticketId)
       if (finalize) {
-        const now = new Date()
-        const timeStr = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })
         updates.status = 'Resolved'
-        updates.end_time = timeStr
+        updates.end_time = convertTo24Hour(tempEndTimeHour, tempEndTimeMinute, tempEndTimeAMPM)
       }
       await updateTicket(ticketId, updates)
 
@@ -941,7 +981,12 @@ export default function ITReportsPage() {
                 <label className="text-label-sm font-medium text-on-surface-variant">Assisted By</label>
                 <select
                   value={tempAssistedBy}
-                  onChange={(e) => setTempAssistedBy(e.target.value)}
+                  onChange={(e) => {
+                    setTempAssistedBy(e.target.value)
+                    if (e.target.value && selectedTicket) {
+                      handleAssistedByChange(selectedTicket.ticketid, e.target.value, selectedTicket.webex_message_id)
+                    }
+                  }}
                   className="w-full px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant/50 text-on-surface focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 text-sm mt-1"
                 >
                   <option value="">Select...</option>
@@ -952,13 +997,12 @@ export default function ITReportsPage() {
               </div>
             </div>
             <div className="flex gap-2 mt-6">
-              <button onClick={() => setSelectedTicket(null)} className="flex-1 px-4 py-2 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors">Cancel</button>
+              <button onClick={() => setSelectedTicket(null)} className="flex-1 px-4 py-2 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors">Close</button>
               <button
                 onClick={async () => {
-                  if (tempAssistedBy) {
-                    await handleAssistedByChange(selectedTicket!.ticketid, tempAssistedBy, selectedTicket!.webex_message_id)
+                  if (tempAssistedBy && selectedTicket) {
+                    await handleAssistedByChange(selectedTicket.ticketid, tempAssistedBy, selectedTicket.webex_message_id)
                   }
-                  setSelectedTicket(null)
                 }}
                 disabled={!tempAssistedBy || savingTicket === selectedTicket!.ticketid}
                 className="flex-1 px-4 py-2 rounded-lg bg-primary text-on-primary hover:bg-primary/90 transition-colors disabled:opacity-50"
@@ -993,6 +1037,52 @@ export default function ITReportsPage() {
                   placeholder="Enter troubleshooting steps..."
                   rows={3}
                 />
+              </div>
+              <div>
+                <label className="text-label-sm font-medium text-on-surface-variant mb-2 block">End Time</label>
+                <div className="flex gap-2 items-center">
+                  <div className="flex-1">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={2}
+                      value={tempEndTimeHour}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/[^0-9]/g, '')
+                        if (val === '' || (parseInt(val) >= 1 && parseInt(val) <= 12)) {
+                          setTempEndTimeHour(val)
+                        }
+                      }}
+                      placeholder="HH"
+                      className="w-full px-2 py-2 rounded-lg bg-surface-container-low border border-outline-variant/50 text-on-surface focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 text-sm text-center font-mono"
+                    />
+                  </div>
+                  <span className="text-on-surface font-mono">:</span>
+                  <div className="flex-1">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={2}
+                      value={tempEndTimeMinute}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/[^0-9]/g, '')
+                        if (val === '' || parseInt(val) <= 59) {
+                          setTempEndTimeMinute(val)
+                        }
+                      }}
+                      placeholder="MM"
+                      className="w-full px-2 py-2 rounded-lg bg-surface-container-low border border-outline-variant/50 text-on-surface focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 text-sm text-center font-mono"
+                    />
+                  </div>
+                  <select
+                    value={tempEndTimeAMPM}
+                    onChange={(e) => setTempEndTimeAMPM(e.target.value as 'AM' | 'PM')}
+                    className="px-2 py-2 rounded-lg bg-surface-container-low border border-outline-variant/50 text-on-surface focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 text-sm"
+                  >
+                    <option value="AM">AM</option>
+                    <option value="PM">PM</option>
+                  </select>
+                </div>
               </div>
             </div>
             <div className="flex gap-2 mt-6">
