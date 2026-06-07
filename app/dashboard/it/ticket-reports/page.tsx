@@ -149,7 +149,8 @@ export default function ITReportsPage() {
   const assistedByOptions = [
     'Kevin Christopher Gallego',
     'Efraim Herald Malbas',
-    'John Melmar Losauro'
+    'John Melmar Losauro',
+    'N/A'
   ]
 
   // Fetch tickets

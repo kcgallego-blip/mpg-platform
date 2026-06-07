@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { ArrowDownUp, BarChart3, CalendarDays, Clock3, Loader2, RefreshCw, ShieldAlert, Table2 } from 'lucide-react'
+import { ArrowDownUp, BarChart3, CalendarDays, Clock3, Loader2, RefreshCw, ShieldAlert, Table2, X } from 'lucide-react'
 import { useAuthStore } from '@/lib/authStore'
 import { supabase } from '@/lib/supabase'
 
@@ -158,6 +158,7 @@ export default function ProductivityPage() {
   const [isSorting, setIsSorting] = useState(false)
   const [error, setError] = useState('')
   const [sortedAgentSummaries, setSortedAgentSummaries] = useState<SortedAgentSummary[]>([])
+  const [selectedAgentEmail, setSelectedAgentEmail] = useState<string | null>(null)
 
   const currentShiftDate = useMemo(() => getDateKey(getShiftDate(new Date())), [])
   const isAllowed = !!user?.role && ALLOWED_ROLES.includes(user.role)
@@ -251,6 +252,7 @@ export default function ProductivityPage() {
 
       const response = await fetch(`/api/productivity/sorted?${params.toString()}`, {
         cache: 'no-store',
+        credentials: 'include',
       })
       const data = (await response.json()) as {
         agents?: SortedAgentSummary[]
@@ -371,6 +373,11 @@ export default function ProductivityPage() {
     )
   }, [productivityRows])
 
+  const selectedAgentTickets = useMemo(() => {
+    if (!selectedAgentEmail) return []
+    return tickets.filter((ticket) => ticket.agent === selectedAgentEmail)
+  }, [selectedAgentEmail, tickets])
+
   if (!isAllowed) {
     return (
       <div className="flex min-h-[400px] items-center justify-center rounded-lg border border-outline-variant/60 bg-surface/80 p-6">
@@ -381,6 +388,8 @@ export default function ProductivityPage() {
       </div>
     )
   }
+
+  const selectedAgent = productivityRows.find((row) => row.email === selectedAgentEmail)
 
   if (isLoading) {
     return (
@@ -394,7 +403,8 @@ export default function ProductivityPage() {
   }
 
   return (
-    <div className="space-y-6 pb-8">
+    <>
+      <div className="space-y-6 pb-8">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <div>
           <p className="text-label-md font-semibold uppercase text-primary-container">
@@ -528,7 +538,7 @@ export default function ProductivityPage() {
               </thead>
               <tbody className="divide-y divide-outline-variant/50">
                 {productivityRows.map((row) => (
-                  <tr key={row.email} className="hover:bg-surface-container/60">
+                  <tr key={row.email} className="cursor-pointer hover:bg-surface-container/60 transition" onClick={() => setSelectedAgentEmail(row.email)}>
                     <td className="min-w-64 px-4 py-3">
                       <p className="font-semibold text-on-surface">{row.name}</p>
                       <p className="text-xs text-on-surface-variant">{row.email}</p>
@@ -578,7 +588,7 @@ export default function ProductivityPage() {
               </thead>
               <tbody className="divide-y divide-outline-variant/50">
                 {productivityRows.map((row) => (
-                  <tr key={row.email} className="hover:bg-surface-container/60">
+                  <tr key={row.email} className="cursor-pointer hover:bg-surface-container/60 transition" onClick={() => setSelectedAgentEmail(row.email)}>
                     <td className="sticky left-0 z-10 min-w-64 bg-surface px-4 py-3">
                       <p className="font-semibold text-on-surface">{row.name}</p>
                       <p className="text-xs text-on-surface-variant">{row.email}</p>
@@ -619,6 +629,55 @@ export default function ProductivityPage() {
           </div>
         )}
       </section>
-    </div>
+      </div>
+
+      {selectedAgentEmail && selectedAgent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="max-h-[90vh] w-full max-w-2xl overflow-hidden rounded-lg border border-outline-variant/60 bg-surface shadow-lg">
+            <div className="flex items-center justify-between border-b border-outline-variant/60 bg-surface-container/80 px-6 py-4">
+              <div>
+                <h2 className="font-semibold text-on-surface">{selectedAgent.name}</h2>
+                <p className="text-xs text-on-surface-variant">{selectedAgent.email}</p>
+              </div>
+              <button
+                onClick={() => setSelectedAgentEmail(null)}
+                className="rounded-lg p-1 transition hover:bg-surface-container-high"
+                aria-label="Close modal"
+              >
+                <X size={20} className="text-on-surface-variant" />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto" style={{ maxHeight: 'calc(90vh - 120px)' }}>
+              <table className="min-w-full divide-y divide-outline-variant/60">
+                <thead className="bg-surface-container/60 sticky top-0">
+                  <tr>
+                    <th className="px-3 py-2 text-left text-xs font-bold uppercase text-on-surface-variant">Ticket</th>
+                    <th className="px-3 py-2 text-left text-xs font-bold uppercase text-on-surface-variant">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-outline-variant/50">
+                  {selectedAgentTickets.map((ticket, index) => (
+                    <tr key={`${ticket.ticket_num}-${index}`} className="hover:bg-surface-container/40">
+                      <td className="px-3 py-2 text-xs font-semibold text-on-surface">{ticket.ticket_num}</td>
+                      <td className="px-3 py-2 text-xs font-semibold text-on-surface">{ticket.status || 'No Status'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {selectedAgentTickets.length === 0 && (
+                <div className="flex items-center justify-center border-t border-outline-variant/60 p-4 text-xs text-on-surface-variant">
+                  No tickets found for this agent.
+                </div>
+              )}
+            </div>
+
+            <div className="border-t border-outline-variant/60 bg-surface-container/40 px-6 py-3 text-right text-xs font-semibold text-on-surface">
+              Total Tickets: {selectedAgentTickets.length}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   )
 }
