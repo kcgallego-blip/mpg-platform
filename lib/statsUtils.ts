@@ -79,25 +79,36 @@ export const PASSING_CRITERIA = {
   TPH: { minValue: 6, type: 'number' }, // 6+
 }
 
-/**
- * Checks if a score passes the criteria
- */
-export function isScorePassing(
-  fieldName: string,
-  value: string | number | null | undefined
-): boolean {
-  if (value === null || value === undefined || value === '') return false
-  
+const NORMALIZED_PASSING_CRITERIA: Record<string, (typeof PASSING_CRITERIA)[keyof typeof PASSING_CRITERIA]> = {}
+
+for (const [fieldName, criteria] of Object.entries(PASSING_CRITERIA)) {
   const normalizedFieldName = fieldName
     .replace(/\s+/g, '_')
     .replace(/\(/g, '')
     .replace(/\)/g, '')
     .replace(/\*/g, '')
-  
-  const criteria = PASSING_CRITERIA[normalizedFieldName as keyof typeof PASSING_CRITERIA]
-  
+    .toLowerCase()
+
+  NORMALIZED_PASSING_CRITERIA[normalizedFieldName] = criteria
+}
+
+export function isScorePassing(
+  fieldName: string,
+  value: string | number | null | undefined
+): boolean {
+  if (value === null || value === undefined || value === '') return false
+
+  const normalizedFieldName = fieldName
+    .replace(/\s+/g, '_')
+    .replace(/\(/g, '')
+    .replace(/\)/g, '')
+    .replace(/\*/g, '')
+    .toLowerCase()
+
+  const criteria = NORMALIZED_PASSING_CRITERIA[normalizedFieldName]
+
   if (!criteria || criteria.type === 'na') return false
-  
+
   try {
     if (criteria.type === 'time' && 'maxSeconds' in criteria) {
       const seconds = typeof value === 'string' ? timeToSeconds(value) : value
@@ -115,7 +126,7 @@ export function isScorePassing(
   } catch {
     return false
   }
-  
+
   return false
 }
 
@@ -128,15 +139,43 @@ export function isNAField(fieldName: string): boolean {
     .replace(/\(/g, '')
     .replace(/\)/g, '')
     .replace(/\*/g, '')
-  
-  const criteria = PASSING_CRITERIA[normalizedFieldName as keyof typeof PASSING_CRITERIA]
+    .toLowerCase()
+
+  const criteria = NORMALIZED_PASSING_CRITERIA[normalizedFieldName]
   return criteria?.type === 'na'
 }
 
 /**
  * Formats display value for a stat field
  */
-export function formatStatValue(value: string | number | null | undefined): string {
+export function formatStatValue(
+  value: string | number | null | undefined,
+  fieldName?: string
+): string {
   if (value === null || value === undefined || value === '') return '—'
+
+  const normalizedFieldName = fieldName
+    ?.replace(/\s+/g, '_')
+    .replace(/\(/g, '')
+    .replace(/\)/g, '')
+    .replace(/\*/g, '')
+    .toLowerCase()
+
+  if (normalizedFieldName === 'nps_score') {
+    const numValue = typeof value === 'string' ? parseFloat(value) : value
+    if (!isNaN(numValue as number)) return String(Math.round(numValue as number))
+  }
+
+  if (['csat_score', 'fcr', 'mod'].includes(normalizedFieldName || '')) {
+    const stringValue = typeof value === 'string' ? value : String(value)
+    if (stringValue.includes('%')) {
+      const percentage = parsePercentage(stringValue)
+      if (percentage !== null) return `${Math.round(percentage)}%`
+    } else {
+      const percentage = typeof value === 'number' ? value : parseFloat(value)
+      if (!isNaN(percentage as number)) return `${Math.round(percentage as number)}%`
+    }
+  }
+
   return String(value)
 }

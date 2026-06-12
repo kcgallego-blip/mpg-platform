@@ -205,7 +205,7 @@ export default function ITReportPage() {
               {formData.agentNames.map((agent) => (
                 <div
                   key={agent}
-                  className="flex items-center gap-1 px-3 py-1 rounded-full bg-primary-container/20 text-primary-container text-sm"
+                  className="flex items-center gap-1 px-3 py-1 rounded-full bg-green-100 text-green-700 border border-green-200 text-sm"
                 >
                   {agent}
                   <button

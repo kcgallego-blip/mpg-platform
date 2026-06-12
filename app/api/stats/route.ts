@@ -1,6 +1,59 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 
+const FUZZY_NAME_MATCH_THRESHOLD = 60
+
+const normalizeNameForMatch = (value: string | null | undefined) =>
+  (value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+
+const getNameTokens = (value: string | null | undefined) =>
+  Array.from(new Set(normalizeNameForMatch(value).split(/\s+/).filter(Boolean)))
+
+const getFuzzyNameScore = (statsName: string | null | undefined, userName: string | null | undefined) => {
+  const normalizedStatsName = normalizeNameForMatch(statsName)
+  const normalizedUserName = normalizeNameForMatch(userName)
+  const userTokens = getNameTokens(userName)
+  const statsTokens = getNameTokens(statsName)
+
+  if (!normalizedStatsName || !normalizedUserName || userTokens.length === 0 || statsTokens.length === 0) {
+    return 0
+  }
+
+  if (normalizedStatsName === normalizedUserName) return 100
+  if (normalizedStatsName.includes(normalizedUserName) || normalizedUserName.includes(normalizedStatsName)) return 90
+
+  const statsTokenSet = new Set(statsTokens)
+  const userTokenSet = new Set(userTokens)
+  const matchedUserTokens = userTokens.filter(token => statsTokenSet.has(token)).length
+  const matchedStatsTokens = statsTokens.filter(token => userTokenSet.has(token)).length
+  const firstToken = userTokens[0]
+  const lastToken = userTokens[userTokens.length - 1]
+
+  if (
+    (firstToken && lastToken && statsTokenSet.has(firstToken) && statsTokenSet.has(lastToken)) ||
+    matchedUserTokens === userTokens.length ||
+    matchedStatsTokens === statsTokens.length
+  ) {
+    return 85
+  }
+
+  if (
+    matchedUserTokens >= 2 &&
+    ((firstToken && statsTokenSet.has(firstToken)) || (lastToken && statsTokenSet.has(lastToken)))
+  ) {
+    return 70
+  }
+
+  if (matchedUserTokens >= Math.ceil(userTokens.length * 0.6)) return 60
+
+  return 0
+}
+
 export async function GET(request: NextRequest) {
   try {
     const authCookie = request.cookies.get('webex_auth')
@@ -55,17 +108,21 @@ export async function GET(request: NextRequest) {
     const safeSortBy = validSortFields.includes(sortBy) ? sortBy : 'name'
     const safeOrder = sortOrder.toLowerCase() === 'desc' ? false : true
 
+    const isAgent = userRole.toLowerCase() === 'agent'
+    const agentNameTokens = getNameTokens(userName)
+
     // Build the base query
-    let query = supabase
-      .from('stats')
-      .select('*')
-      .order(safeSortBy, { ascending: safeOrder })
-      .order('created_at', { ascending: false })
+    let query = supabase.from('stats').select('*')
 
     // Apply role-based filtering
-    if (userRole.toLowerCase() === 'agent') {
-      // Agents can only see their own stats
-      query = query.eq('name', userName)
+    if (isAgent) {
+      // Agents can only see stats rows that fuzzy-match their users.name value.
+      if (agentNameTokens.length > 0) {
+        const filters = agentNameTokens.map(token => `name.ilike.%${token}%`)
+        query = query.or(filters.join(','))
+      } else {
+        query = query.eq('name', userName)
+      }
     } else if (
       userRole.toLowerCase() === 'team leader' ||
       userRole.toLowerCase() === 'supervisor'
@@ -75,22 +132,24 @@ export async function GET(request: NextRequest) {
     }
     // Admin/Manager roles can see all stats (no additional filter)
 
-    // Apply search filter using filter method
-    if (searchQuery) {
-      query = query.filter('name', 'ilike', `%${searchQuery}%`)
-    }
+    query = query.order(safeSortBy, { ascending: safeOrder }).order('created_at', { ascending: false })
 
-    // Apply supervisor filter
-    if (supervisorFilter && supervisorFilter !== 'all') {
-      query = query.eq('supervisor', supervisorFilter)
-    }
-
-    const { data: stats, error: statsError } = await query
+    const { data: rawStats, error: statsError } = await query
 
     if (statsError) {
       console.error('Stats fetch error:', statsError)
       return NextResponse.json({ error: 'Failed to fetch stats' }, { status: 500 })
     }
+
+    const stats = isAgent
+      ? (rawStats || [])
+          .filter(stat => getFuzzyNameScore(stat.name, userName) >= FUZZY_NAME_MATCH_THRESHOLD)
+          .sort((a, b) => {
+            const scoreDiff = getFuzzyNameScore(b.name, userName) - getFuzzyNameScore(a.name, userName)
+            if (scoreDiff !== 0) return scoreDiff
+            return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+          })
+      : rawStats || []
 
     // If team leader/supervisor, also return list of unique supervisors for filtering
     let supervisors: string[] = []

@@ -61,6 +61,18 @@ const DISPLAY_COLUMNS = [
   'tickets_solved',
 ]
 
+const SCORECARD_METRICS = [
+  { field: 'acw', label: 'ACW', description: 'After Call Work' },
+  { field: 'aht', label: 'AHT', description: 'Average Handle Time' },
+  { field: 'hold', label: 'Hold', description: 'Hold Time' },
+  { field: 'talk_time', label: 'Talk Time', description: 'Total Talk Time' },
+  { field: 'csat_score', label: 'CSAT', description: 'Customer Satisfaction' },
+  { field: 'nps_score', label: 'NPS', description: 'Net Promoter Score' },
+  { field: 'mod', label: 'MOD', description: 'Manager Observation' },
+  { field: 'fcr', label: 'FCR', description: 'First Contact Resolution' },
+  { field: 'tph', label: 'TPH', description: 'Tickets Per Hour' },
+]
+
 const COLUMN_LABELS: Record<string, string> = {
   name: 'Agent Name',
   supervisor: 'Team Leader',
@@ -168,13 +180,31 @@ export default function StatsPage() {
           <span className="text-on-surface-variant">—</span>
         ) : passing ? (
           <span className={`inline-flex items-center rounded-full px-3 py-1.5 font-semibold ${colorClass}`}>
-            {formatStatValue(value)}
+            {formatStatValue(value, fieldName)}
           </span>
         ) : (
-          <span className="text-on-surface">{formatStatValue(value)}</span>
+          <span className="text-on-surface">{formatStatValue(value, fieldName)}</span>
         )}
       </td>
     )
+  }
+
+  const getScorecardStatus = (fieldName: string, value: string | number | null | undefined) => {
+    if (isNAField(fieldName)) return { label: 'N/A', className: 'bg-surface-container text-on-surface-variant border border-outline-variant' }
+    if (isScorePassing(fieldName, value)) return { label: 'Passing', className: 'bg-green-100 text-green-700 border border-green-200' }
+    return { label: 'Below Target', className: 'bg-red-50 text-red-700 border border-red-200' }
+  }
+
+  const formatScorecardDate = (date: string) => {
+    try {
+      return new Intl.DateTimeFormat('en-PH', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+      }).format(new Date(date))
+    } catch {
+      return ''
+    }
   }
 
   const renderHeader = (field: string) => {
@@ -211,6 +241,8 @@ export default function StatsPage() {
       </div>
     )
   }
+
+  const latestAgentStat = stats[0]!
 
   return (
     <div className="space-y-6 pb-8">
@@ -298,7 +330,65 @@ export default function StatsPage() {
       )}
 
       {/* Stats Table */}
-      {stats.length === 0 ? (
+      {userRole?.toLowerCase() === 'agent' ? (
+        stats.length === 0 ? (
+          <div className="flex flex-col items-center justify-center rounded-lg border border-outline-variant/60 bg-surface/70 py-16">
+            <AlertCircle size={40} className="mb-4 text-on-surface-variant/40" />
+            <p className="text-on-surface-variant">No scorecard available yet.</p>
+          </div>
+        ) : (
+          <div className="rounded-2xl border border-outline-variant/60 bg-surface p-5 shadow-sm">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="text-label-md font-semibold uppercase text-primary-container">
+                  Agent Scorecard
+                </p>
+                <h2 className="mt-1 font-hanken text-headline-md font-bold text-on-surface">
+                  {latestAgentStat.name}
+                </h2>
+                <p className="mt-1 text-sm text-on-surface-variant">
+                  {latestAgentStat.supervisor ? `Team Leader: ${latestAgentStat.supervisor}` : 'Performance metrics'}
+                </p>
+              </div>
+              <div className="rounded-xl bg-surface-container-low p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-on-surface-variant">
+                  Latest Update
+                </p>
+                <p className="mt-1 text-sm font-semibold text-on-surface">
+                  {formatScorecardDate(latestAgentStat.created_at)}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {SCORECARD_METRICS.map(metric => {
+                const value = latestAgentStat[metric.field as keyof Stat]
+                const status = getScorecardStatus(metric.field, value)
+
+                return (
+                  <div
+                    key={metric.field}
+                    className="rounded-xl border border-outline-variant/60 bg-surface-dim p-5"
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <p className="text-sm font-semibold text-on-surface">{metric.label}</p>
+                        <p className="mt-1 text-xs text-on-surface-variant">{metric.description}</p>
+                      </div>
+                      <span className={`rounded-full px-3 py-1 text-xs font-semibold ${status.className}`}>
+                        {status.label}
+                      </span>
+                    </div>
+                    <div className="mt-5 text-3xl font-bold text-on-surface">
+                      {formatStatValue(value, metric.field)}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )
+      ) : stats.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-lg border border-outline-variant/60 bg-surface/70 py-16">
           <AlertCircle size={40} className="mb-4 text-on-surface-variant/40" />
           <p className="text-on-surface-variant">
