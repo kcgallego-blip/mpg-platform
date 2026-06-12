@@ -1,12 +1,13 @@
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/lib/authStore'
-import { LogOut, Settings, User, LayoutDashboard, Ticket, FileText, ChevronDown, ChevronRight, Users, BarChart3 } from 'lucide-react'
+import { LogOut, Settings, User, LayoutDashboard, Ticket, FileText, ChevronDown, ChevronRight, Users, BarChart3, TrendingUp } from 'lucide-react'
 import { useState } from 'react'
 import Image from 'next/image'
 
 const allNavItems = [
   { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+  { href: '/dashboard/stats', icon: TrendingUp, label: 'Stats' },
   { href: '/dashboard/productivity', icon: BarChart3, label: 'Productivity' },
   {
     label: 'IT',
@@ -39,6 +40,7 @@ function getNavItemsByRole(role: string | null | undefined) {
     case 'Supervisor':
       return [
         { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+        { href: '/dashboard/stats', icon: TrendingUp, label: 'Stats' },
         { href: '/dashboard/productivity', icon: BarChart3, label: 'Productivity' },
         {
           label: 'IT',
@@ -53,6 +55,7 @@ function getNavItemsByRole(role: string | null | undefined) {
     case 'Team Leader':
       return [
         { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+        { href: '/dashboard/stats', icon: TrendingUp, label: 'Stats' },
         { href: '/dashboard/productivity', icon: BarChart3, label: 'Productivity' },
         {
           label: 'IT',
@@ -64,7 +67,10 @@ function getNavItemsByRole(role: string | null | undefined) {
         },
       ]
     case 'Agent':
-      return [{ href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' }]
+      return [
+        { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+        { href: '/dashboard/stats', icon: TrendingUp, label: 'Stats' },
+      ]
     default:
       return [{ href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' }]
   }

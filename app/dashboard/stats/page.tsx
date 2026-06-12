@@ -1,0 +1,343 @@
+'use client'
+
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useAuthStore } from '@/lib/authStore'
+import { useRouter } from 'next/navigation'
+import {
+  Loader2,
+  Search,
+  ChevronUp,
+  ChevronDown,
+  AlertCircle,
+  Filter,
+} from 'lucide-react'
+import { isScorePassing, isNAField, formatStatValue, PASSING_CRITERIA } from '@/lib/statsUtils'
+
+type Stat = {
+  id: string
+  supervisor: string
+  name: string
+  acw: string | null
+  aht: string | null
+  hold: string | null
+  talk_time: string | null
+  csat_score: string | null
+  dsat: string | null
+  nps_score: number | null
+  promoter: number | null
+  mod: string | null
+  mod_value: number | null
+  fcr: string | null
+  fcr_value: number | null
+  surveys_answered: number | null
+  calls_touched: number | null
+  tickets_solved: number | null
+  transactions: number | null
+  productive_hours: string | null
+  tph: number | null
+  created_at: string
+}
+
+type SortConfig = {
+  field: string
+  order: 'asc' | 'desc'
+}
+
+const DISPLAY_COLUMNS = [
+  'name',
+  'supervisor',
+  'acw',
+  'aht',
+  'hold',
+  'talk_time',
+  'csat_score',
+  'nps_score',
+  'mod',
+  'fcr',
+  'tph',
+  'surveys_answered',
+  'calls_touched',
+  'tickets_solved',
+]
+
+const COLUMN_LABELS: Record<string, string> = {
+  name: 'Agent Name',
+  supervisor: 'Team Leader',
+  acw: 'ACW',
+  aht: 'AHT',
+  hold: 'Hold',
+  talk_time: 'Talk Time',
+  csat_score: 'CSAT',
+  dsat: 'DSAT',
+  nps_score: 'NPS',
+  promoter: 'Promoter',
+  mod: 'MOD',
+  mod_value: 'MOD (*)',
+  fcr: 'FCR',
+  fcr_value: 'FCR (*)',
+  surveys_answered: 'Surveys',
+  calls_touched: 'Calls',
+  tickets_solved: 'Tickets',
+  transactions: 'Transactions',
+  productive_hours: 'Prod Hours',
+  tph: 'TPH',
+}
+
+export default function StatsPage() {
+  const { user } = useAuthStore()
+  const router = useRouter()
+  const [stats, setStats] = useState<Stat[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [selectedSupervisor, setSelectedSupervisor] = useState('all')
+  const [supervisors, setSupervisors] = useState<string[]>([])
+  const [sortConfig, setSortConfig] = useState<SortConfig>({ field: 'name', order: 'asc' })
+  const [userRole, setUserRole] = useState<string | null>(null)
+  const [showMobileFilters, setShowMobileFilters] = useState(false)
+
+  const loadStats = useCallback(async () => {
+    if (!user?.email) {
+      setIsLoading(false)
+      router.push('/app/login')
+      return
+    }
+
+    try {
+      setIsLoading(true)
+      setError('')
+
+      const queryParams = new URLSearchParams({
+        search: searchQuery,
+        supervisor: selectedSupervisor,
+        sortBy: sortConfig.field,
+        sortOrder: sortConfig.order,
+      })
+
+      const response = await fetch(`/api/stats?${queryParams}`)
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          router.push('/app/login')
+          return
+        }
+        throw new Error('Failed to fetch stats')
+      }
+
+      const data = await response.json()
+      setStats(data.stats || [])
+      setSupervisors(data.supervisors || [])
+      setUserRole(data.userRole)
+    } catch (err: any) {
+      setError(err.message || 'Failed to load stats')
+      console.error('Stats error:', err)
+    } finally {
+      setIsLoading(false)
+    }
+  }, [user?.email, searchQuery, selectedSupervisor, sortConfig, router])
+
+  useEffect(() => {
+    loadStats()
+  }, [loadStats])
+
+  const handleSort = (field: string) => {
+    setSortConfig(prevConfig => ({
+      field,
+      order: prevConfig.field === field && prevConfig.order === 'asc' ? 'desc' : 'asc',
+    }))
+  }
+
+  const getScoreColor = (fieldName: string, value: string | number | null | undefined) => {
+    if (isNAField(fieldName)) return ''
+    if (isScorePassing(fieldName, value)) return 'bg-green-100 text-green-700'
+    return ''
+  }
+
+  const renderCell = (fieldName: string, value: string | number | null | undefined) => {
+    const isNA = isNAField(fieldName)
+    const passing = !isNA && isScorePassing(fieldName, value)
+    const colorClass = getScoreColor(fieldName, value)
+
+    return (
+      <td
+        key={`${fieldName}-${value}`}
+        className="whitespace-nowrap px-4 py-3 text-sm"
+      >
+        {isNA ? (
+          <span className="text-on-surface-variant">—</span>
+        ) : passing ? (
+          <span className={`inline-block rounded-full px-3 py-1 font-medium ${colorClass}`}>
+            {formatStatValue(value)}
+          </span>
+        ) : (
+          <span className="text-on-surface">{formatStatValue(value)}</span>
+        )}
+      </td>
+    )
+  }
+
+  const renderHeader = (field: string) => {
+    const isActive = sortConfig.field === field
+    const label = COLUMN_LABELS[field] || field
+
+    return (
+      <th
+        key={field}
+        onClick={() => handleSort(field)}
+        className="cursor-pointer px-4 py-3 text-left font-semibold text-on-surface hover:bg-surface-dim transition-colors"
+      >
+        <div className="flex items-center gap-2 whitespace-nowrap">
+          {label}
+          {isActive && (
+            sortConfig.order === 'asc' ? (
+              <ChevronUp size={16} className="text-primary" />
+            ) : (
+              <ChevronDown size={16} className="text-primary" />
+            )
+          )}
+        </div>
+      </th>
+    )
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex min-h-[500px] items-center justify-center">
+        <div className="text-center">
+          <Loader2 size={48} className="mx-auto mb-4 animate-spin text-primary-container" />
+          <p className="text-on-surface-variant">Loading stats...</p>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6 pb-8">
+      {/* Header */}
+      <div>
+        <p className="text-label-md font-semibold uppercase text-primary-container">Stats</p>
+        <h1 className="font-hanken text-headline-lg font-bold text-on-surface">
+          {userRole?.toLowerCase() === 'agent' ? 'Your Performance' : 'Team Performance'}
+        </h1>
+        <p className="mt-2 max-w-3xl text-on-surface-variant">
+          {userRole?.toLowerCase() === 'agent'
+            ? 'View your performance metrics and KPIs.'
+            : 'View and manage agent performance metrics. Green chips indicate passing scores.'}
+        </p>
+      </div>
+
+      {error && (
+        <div className="flex gap-3 rounded-lg border border-error/30 bg-error/10 p-4">
+          <AlertCircle size={20} className="mt-0.5 flex-shrink-0 text-error" />
+          <div>
+            <p className="font-medium text-error">Error</p>
+            <p className="text-sm text-error/80">{error}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Filters and Search */}
+      {userRole?.toLowerCase() !== 'agent' && (
+        <div className="space-y-4">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            {/* Search */}
+            <div className="flex-1">
+              <label htmlFor="search" className="mb-2 block text-sm font-medium text-on-surface">
+                Search Agent
+              </label>
+              <div className="relative">
+                <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant" />
+                <input
+                  id="search"
+                  type="text"
+                  placeholder="Search by name..."
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  className="w-full rounded-lg border border-outline bg-surface pl-10 pr-4 py-2.5 text-on-surface placeholder-on-surface-variant outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
+                />
+              </div>
+            </div>
+
+            {/* Supervisor Filter */}
+            {supervisors.length > 0 && (
+              <div className="flex-1 lg:max-w-xs">
+                <label htmlFor="supervisor" className="mb-2 block text-sm font-medium text-on-surface">
+                  Team Leader
+                </label>
+                <select
+                  id="supervisor"
+                  value={selectedSupervisor}
+                  onChange={e => setSelectedSupervisor(e.target.value)}
+                  className="w-full rounded-lg border border-outline bg-surface px-4 py-2.5 text-on-surface outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
+                >
+                  <option value="all">All Team Leaders</option>
+                  {supervisors.map(supervisor => (
+                    <option key={supervisor} value={supervisor}>
+                      {supervisor}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Stats Table */}
+      {stats.length === 0 ? (
+        <div className="flex flex-col items-center justify-center rounded-lg border border-outline-variant/60 bg-surface/70 py-16">
+          <AlertCircle size={40} className="mb-4 text-on-surface-variant/40" />
+          <p className="text-on-surface-variant">
+            {searchQuery ? 'No agents found matching your search.' : 'No stats available.'}
+          </p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-outline-variant/60 bg-surface">
+          <table className="w-full border-collapse">
+            <thead className="border-b border-outline-variant/60 bg-surface-dim">
+              <tr>
+                {DISPLAY_COLUMNS.map(field => renderHeader(field))}
+              </tr>
+            </thead>
+            <tbody>
+              {stats.map((stat, idx) => (
+                <tr
+                  key={stat.id}
+                  className={`border-b border-outline-variant/30 transition hover:bg-surface-dim ${
+                    idx % 2 === 0 ? 'bg-surface' : 'bg-surface/50'
+                  }`}
+                >
+                  {DISPLAY_COLUMNS.map(field => {
+                    const value = stat[field as keyof Stat]
+                    return renderCell(field, value)
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Legend */}
+      <div className="space-y-2 rounded-lg border border-outline-variant/60 bg-surface-dim p-4">
+        <p className="text-sm font-medium text-on-surface">Legend:</p>
+        <div className="flex flex-wrap gap-4">
+          <div className="flex items-center gap-2">
+            <div className="inline-block rounded-full bg-green-100 px-3 py-1 text-green-700">
+              Passing
+            </div>
+            <span className="text-sm text-on-surface-variant">Score meets requirements</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="text-sm text-on-surface">Not Passing</div>
+            <span className="text-sm text-on-surface-variant">Score below requirements</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="text-sm text-on-surface-variant">—</div>
+            <span className="text-sm text-on-surface-variant">Not applicable or no data</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}

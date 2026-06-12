@@ -203,6 +203,81 @@ export interface Database {
           shift_date?: string | null
         }
       }
+      stats: {
+        Row: {
+          id: string
+          supervisor: string
+          name: string
+          acw: string | null
+          aht: string | null
+          hold: string | null
+          talk_time: string | null
+          csat_score: string | null
+          dsat: string | null
+          nps_score: number | null
+          promoter: number | null
+          mod: string | null
+          mod_value: number | null
+          fcr: string | null
+          fcr_value: number | null
+          surveys_answered: number | null
+          calls_touched: number | null
+          tickets_solved: number | null
+          transactions: number | null
+          productive_hours: string | null
+          tph: number | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          supervisor: string
+          name: string
+          acw?: string | null
+          aht?: string | null
+          hold?: string | null
+          talk_time?: string | null
+          csat_score?: string | null
+          dsat?: string | null
+          nps_score?: number | null
+          promoter?: number | null
+          mod?: string | null
+          mod_value?: number | null
+          fcr?: string | null
+          fcr_value?: number | null
+          surveys_answered?: number | null
+          calls_touched?: number | null
+          tickets_solved?: number | null
+          transactions?: number | null
+          productive_hours?: string | null
+          tph?: number | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          supervisor?: string
+          name?: string
+          acw?: string | null
+          aht?: string | null
+          hold?: string | null
+          talk_time?: string | null
+          csat_score?: string | null
+          dsat?: string | null
+          nps_score?: number | null
+          promoter?: number | null
+          mod?: string | null
+          mod_value?: number | null
+          fcr?: string | null
+          fcr_value?: number | null
+          surveys_answered?: number | null
+          calls_touched?: number | null
+          tickets_solved?: number | null
+          transactions?: number | null
+          productive_hours?: string | null
+          tph?: number | null
+          updated_at?: string
+        }
+      }
     }
   }
 }
