@@ -22,25 +22,10 @@ CREATE TABLE IF NOT EXISTS public.stats (
   productive_hours TEXT,
   tph DECIMAL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  CONSTRAINT unique_stats_date UNIQUE (name, supervisor, created_at::date)
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Create index for faster lookups
 CREATE INDEX IF NOT EXISTS idx_stats_name ON public.stats(name);
 CREATE INDEX IF NOT EXISTS idx_stats_supervisor ON public.stats(supervisor);
 CREATE INDEX IF NOT EXISTS idx_stats_created_at ON public.stats(created_at DESC);
-
--- Enable Row Level Security
-ALTER TABLE public.stats ENABLE ROW LEVEL SECURITY;
-
--- Create policy to allow authenticated users to read stats
-CREATE POLICY "Authenticated users can read stats"
-  ON public.stats
-  FOR SELECT
-  USING (true);
-
--- Create policy for service role to manage stats
-CREATE POLICY "Service role can manage stats"
-  ON public.stats
-  USING (current_setting('role') = 'authenticated');

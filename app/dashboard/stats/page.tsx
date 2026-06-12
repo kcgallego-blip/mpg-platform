@@ -10,6 +10,7 @@ import {
   ChevronDown,
   AlertCircle,
   Filter,
+  Upload,
 } from 'lucide-react'
 import { isScorePassing, isNAField, formatStatValue, PASSING_CRITERIA } from '@/lib/statsUtils'
 
@@ -149,7 +150,7 @@ export default function StatsPage() {
 
   const getScoreColor = (fieldName: string, value: string | number | null | undefined) => {
     if (isNAField(fieldName)) return ''
-    if (isScorePassing(fieldName, value)) return 'bg-green-100 text-green-700'
+    if (isScorePassing(fieldName, value)) return 'bg-emerald-100 text-emerald-800 border border-emerald-300'
     return ''
   }
 
@@ -166,7 +167,7 @@ export default function StatsPage() {
         {isNA ? (
           <span className="text-on-surface-variant">—</span>
         ) : passing ? (
-          <span className={`inline-block rounded-full px-3 py-1 font-medium ${colorClass}`}>
+          <span className={`inline-flex items-center rounded-full px-3 py-1.5 font-semibold ${colorClass}`}>
             {formatStatValue(value)}
           </span>
         ) : (
@@ -214,16 +215,29 @@ export default function StatsPage() {
   return (
     <div className="space-y-6 pb-8">
       {/* Header */}
-      <div>
-        <p className="text-label-md font-semibold uppercase text-primary-container">Stats</p>
-        <h1 className="font-hanken text-headline-lg font-bold text-on-surface">
-          {userRole?.toLowerCase() === 'agent' ? 'Your Performance' : 'Team Performance'}
-        </h1>
-        <p className="mt-2 max-w-3xl text-on-surface-variant">
-          {userRole?.toLowerCase() === 'agent'
-            ? 'View your performance metrics and KPIs.'
-            : 'View and manage agent performance metrics. Green chips indicate passing scores.'}
-        </p>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-label-md font-semibold uppercase text-primary-container">Stats</p>
+          <h1 className="font-hanken text-headline-lg font-bold text-on-surface">
+            {userRole?.toLowerCase() === 'agent' ? 'Your Performance' : 'Team Performance'}
+          </h1>
+          <p className="mt-2 max-w-3xl text-on-surface-variant">
+            {userRole?.toLowerCase() === 'agent'
+              ? 'View your performance metrics and KPIs.'
+              : 'View and manage agent performance metrics. Green chips indicate passing scores.'}
+          </p>
+        </div>
+        {(userRole?.toLowerCase() === 'team leader' ||
+          userRole?.toLowerCase() === 'admin' ||
+          userRole?.toLowerCase() === 'manager') && (
+          <button
+            onClick={() => router.push('/dashboard/stats/upload')}
+            className="flex items-center gap-2 rounded-lg bg-primary-container px-6 py-2.5 font-medium text-on-primary-container transition hover:opacity-90 whitespace-nowrap"
+          >
+            <Upload size={18} />
+            Upload Stats
+          </button>
+        )}
       </div>
 
       {error && (

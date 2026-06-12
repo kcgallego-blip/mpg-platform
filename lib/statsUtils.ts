@@ -99,18 +99,18 @@ export function isScorePassing(
   if (!criteria || criteria.type === 'na') return false
   
   try {
-    if (criteria.type === 'time') {
+    if (criteria.type === 'time' && 'maxSeconds' in criteria) {
       const seconds = typeof value === 'string' ? timeToSeconds(value) : value
       if (seconds === null) return false
-      return seconds <= (criteria.maxSeconds || Infinity)
-    } else if (criteria.type === 'percentage') {
+      return seconds <= criteria.maxSeconds
+    } else if (criteria.type === 'percentage' && 'minPercentage' in criteria) {
       const percentage = typeof value === 'string' ? parsePercentage(value) : value
       if (percentage === null) return false
-      return percentage >= (criteria.minPercentage || 0)
-    } else if (criteria.type === 'number') {
+      return percentage >= criteria.minPercentage
+    } else if (criteria.type === 'number' && 'minValue' in criteria) {
       const numValue = typeof value === 'string' ? parseFloat(value) : value
       if (isNaN(numValue as number)) return false
-      return numValue >= (criteria.minValue || 0)
+      return numValue >= criteria.minValue
     }
   } catch {
     return false

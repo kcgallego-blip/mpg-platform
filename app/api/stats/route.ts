@@ -37,29 +37,7 @@ export async function GET(request: NextRequest) {
     const sortBy = searchParams.get('sortBy') || 'name'
     const sortOrder = searchParams.get('sortOrder') || 'asc'
 
-    let query = supabase.from('stats').select('*')
-
-    // Role-based filtering
-    if (userRole.toLowerCase() === 'agent') {
-      // Agents can only see their own stats
-      query = query.eq('name', userName)
-    } else if (userRole.toLowerCase() === 'team leader' || userRole.toLowerCase() === 'supervisor') {
-      // Team leaders can see stats of agents under them
-      query = query.eq('supervisor', dbUser.name || userData.name)
-    }
-    // Admin/Manager roles can see all stats (no additional filter)
-
-    // Apply search filter
-    if (searchQuery) {
-      query = query.ilike('name', `%${searchQuery}%`)
-    }
-
-    // Apply supervisor filter
-    if (supervisorFilter && supervisorFilter !== 'all') {
-      query = query.eq('supervisor', supervisorFilter)
-    }
-
-    // Apply sorting
+    // Validate sort parameters
     const validSortFields = [
       'name',
       'supervisor',
@@ -77,7 +55,35 @@ export async function GET(request: NextRequest) {
     const safeSortBy = validSortFields.includes(sortBy) ? sortBy : 'name'
     const safeOrder = sortOrder.toLowerCase() === 'desc' ? false : true
 
-    query = query.order(safeSortBy, { ascending: safeOrder }).order('created_at', { ascending: false })
+    // Build the base query
+    let query = supabase
+      .from('stats')
+      .select('*')
+      .order(safeSortBy, { ascending: safeOrder })
+      .order('created_at', { ascending: false })
+
+    // Apply role-based filtering
+    if (userRole.toLowerCase() === 'agent') {
+      // Agents can only see their own stats
+      query = query.eq('name', userName)
+    } else if (
+      userRole.toLowerCase() === 'team leader' ||
+      userRole.toLowerCase() === 'supervisor'
+    ) {
+      // Team leaders can see stats of agents under them
+      query = query.eq('supervisor', dbUser.name || userData.name)
+    }
+    // Admin/Manager roles can see all stats (no additional filter)
+
+    // Apply search filter using filter method
+    if (searchQuery) {
+      query = query.filter('name', 'ilike', `%${searchQuery}%`)
+    }
+
+    // Apply supervisor filter
+    if (supervisorFilter && supervisorFilter !== 'all') {
+      query = query.eq('supervisor', supervisorFilter)
+    }
 
     const { data: stats, error: statsError } = await query
 
@@ -92,10 +98,13 @@ export async function GET(request: NextRequest) {
       const { data: supervisorData } = await supabase
         .from('stats')
         .select('supervisor')
-        .distinct()
         .order('supervisor', { ascending: true })
 
-      supervisors = supervisorData?.map(s => s.supervisor).filter(s => s) || []
+      // Get unique supervisors and filter out nulls
+      const uniqueSupervisors = Array.from(
+        new Set(supervisorData?.map(s => s.supervisor).filter(s => s) || [])
+      )
+      supervisors = uniqueSupervisors
     }
 
     return NextResponse.json({
