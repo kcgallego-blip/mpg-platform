@@ -9,10 +9,16 @@ import {
   ChevronUp,
   ChevronDown,
   AlertCircle,
-  Filter,
   Upload,
 } from 'lucide-react'
-import { isScorePassing, isNAField, formatStatValue, PASSING_CRITERIA } from '@/lib/statsUtils'
+import {
+  getStatsWeekNumber,
+  getStatsWeekRange,
+  getStatsWeekRangeLabel,
+  isScorePassing,
+  isNAField,
+  formatStatValue,
+} from '@/lib/statsUtils'
 
 type Stat = {
   id: string
@@ -36,6 +42,8 @@ type Stat = {
   transactions: number | null
   productive_hours: string | null
   tph: number | null
+  week: number
+  range: number
   created_at: string
 }
 
@@ -52,11 +60,14 @@ const DISPLAY_COLUMNS = [
   'hold',
   'talk_time',
   'csat_score',
+  'dsat',
   'nps_score',
   'mod',
+  'mod_value',
   'fcr',
-  'tph',
+  'fcr_value',
   'surveys_answered',
+  'tph',
   'calls_touched',
   'tickets_solved',
 ]
@@ -67,10 +78,38 @@ const SCORECARD_METRICS = [
   { field: 'hold', label: 'Hold', description: 'Hold Time' },
   { field: 'talk_time', label: 'Talk Time', description: 'Total Talk Time' },
   { field: 'csat_score', label: 'CSAT', description: 'Customer Satisfaction' },
+  { field: 'dsat', label: 'DSAT', description: 'Customer Dissatisfaction' },
   { field: 'nps_score', label: 'NPS', description: 'Net Promoter Score' },
-  { field: 'mod', label: 'MOD', description: 'Manager Observation' },
+  { field: 'promoter', label: 'NPS Promoters', description: 'NPS Promoters Count' },
+  { field: 'mod', label: 'MOD', description: 'Moment of Delight' },
+  { field: 'mod_value', label: 'MOD Count', description: 'Moment of Delight Count' },
   { field: 'fcr', label: 'FCR', description: 'First Contact Resolution' },
+  { field: 'fcr_value', label: 'FCR Count', description: 'First Contact Resolution Count' },
+  { field: 'surveys_answered', label: 'Surveys Answered', description: 'Total surveys answered' },
   { field: 'tph', label: 'TPH', description: 'Tickets Per Hour' },
+]
+
+const PRIMARY_METRICS = ['csat_score', 'acw', 'aht', 'surveys_answered', 'tph']
+const SECONDARY_METRICS = ['nps_score', 'mod', 'fcr']
+
+const SCORECARD_METRIC_TIERS = [
+  {
+    title: 'Key Metrics',
+    style: 'primary' as const,
+    fields: PRIMARY_METRICS,
+  },
+  {
+    title: 'Secondary Metrics',
+    style: 'secondary' as const,
+    fields: SECONDARY_METRICS,
+  },
+  {
+    title: 'Basic Metrics',
+    style: 'basic' as const,
+    fields: SCORECARD_METRICS.map(metric => metric.field).filter(field =>
+      !PRIMARY_METRICS.includes(field) && !SECONDARY_METRICS.includes(field)
+    ),
+  },
 ]
 
 const COLUMN_LABELS: Record<string, string> = {
@@ -85,10 +124,10 @@ const COLUMN_LABELS: Record<string, string> = {
   nps_score: 'NPS',
   promoter: 'Promoter',
   mod: 'MOD',
-  mod_value: 'MOD (*)',
+  mod_value: 'MOD Count',
   fcr: 'FCR',
-  fcr_value: 'FCR (*)',
-  surveys_answered: 'Surveys',
+  fcr_value: 'FCR Count',
+  surveys_answered: 'Surveys Answered',
   calls_touched: 'Calls',
   tickets_solved: 'Tickets',
   transactions: 'Transactions',
@@ -107,7 +146,21 @@ export default function StatsPage() {
   const [supervisors, setSupervisors] = useState<string[]>([])
   const [sortConfig, setSortConfig] = useState<SortConfig>({ field: 'name', order: 'asc' })
   const [userRole, setUserRole] = useState<string | null>(null)
-  const [showMobileFilters, setShowMobileFilters] = useState(false)
+  const [selectedWeek, setSelectedWeek] = useState(() => getStatsWeekNumber())
+  const [displayedRange, setDisplayedRange] = useState(() => getStatsWeekRange())
+
+  const displayedDateRange = useMemo(
+    () => getStatsWeekRangeLabel(selectedWeek, displayedRange),
+    [selectedWeek, displayedRange]
+  )
+
+  const weekOptions = useMemo(() => {
+    const currentWeek = getStatsWeekNumber()
+    return Array.from(
+      { length: Math.min(currentWeek, 12) },
+      (_, index) => currentWeek - index
+    )
+  }, [])
 
   const loadStats = useCallback(async () => {
     if (!user?.email) {
@@ -125,6 +178,7 @@ export default function StatsPage() {
         supervisor: selectedSupervisor,
         sortBy: sortConfig.field,
         sortOrder: sortConfig.order,
+        week: String(selectedWeek),
       })
 
       const response = await fetch(`/api/stats?${queryParams}`)
@@ -140,6 +194,7 @@ export default function StatsPage() {
       const data = await response.json()
       setStats(data.stats || [])
       setSupervisors(data.supervisors || [])
+      setDisplayedRange(data.range || getStatsWeekRange())
       setUserRole(data.userRole)
     } catch (err: any) {
       setError(err.message || 'Failed to load stats')
@@ -147,7 +202,7 @@ export default function StatsPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [user?.email, searchQuery, selectedSupervisor, sortConfig, router])
+  }, [user?.email, searchQuery, selectedSupervisor, sortConfig, selectedWeek, router])
 
   useEffect(() => {
     loadStats()
@@ -167,6 +222,11 @@ export default function StatsPage() {
   }
 
   const renderCell = (fieldName: string, value: string | number | null | undefined) => {
+    const formattedValue = formatStatValue(value, fieldName)
+    if (!formattedValue) {
+      return <td key={`${fieldName}-${value}`} className="whitespace-nowrap px-4 py-3 text-sm" />
+    }
+
     const isNA = isNAField(fieldName)
     const passing = !isNA && isScorePassing(fieldName, value)
     const colorClass = getScoreColor(fieldName, value)
@@ -180,19 +240,32 @@ export default function StatsPage() {
           <span className="text-on-surface-variant">—</span>
         ) : passing ? (
           <span className={`inline-flex items-center rounded-full px-3 py-1.5 font-semibold ${colorClass}`}>
-            {formatStatValue(value, fieldName)}
+            {formattedValue}
           </span>
         ) : (
-          <span className="text-on-surface">{formatStatValue(value, fieldName)}</span>
+          <span className="text-on-surface">{formattedValue}</span>
         )}
       </td>
     )
   }
 
   const getScorecardStatus = (fieldName: string, value: string | number | null | undefined) => {
+    const normalizedValue = typeof value === 'string' ? value.trim() : value
+    if (fieldName === 'tph' && (value === null || value === undefined || value === '' || normalizedValue === '–' || normalizedValue === '-' || normalizedValue === '—' || normalizedValue === 'Not available')) {
+      return { label: 'Not available yet', className: 'bg-surface-container text-on-surface-variant border border-outline-variant' }
+    }
     if (isNAField(fieldName)) return { label: 'N/A', className: 'bg-surface-container text-on-surface-variant border border-outline-variant' }
     if (isScorePassing(fieldName, value)) return { label: 'Passing', className: 'bg-green-100 text-green-700 border border-green-200' }
     return { label: 'Below Target', className: 'bg-red-50 text-red-700 border border-red-200' }
+  }
+
+  const formatAgentMetricValue = (fieldName: string, value: string | number | null | undefined) => {
+    const formattedValue = formatStatValue(value, fieldName)
+    if (fieldName === 'tph' && formattedValue !== 'Not available') {
+      const numericValue = Number(formattedValue)
+      if (Number.isFinite(numericValue)) return String(Math.round(numericValue))
+    }
+    return formattedValue
   }
 
   const formatScorecardDate = (date: string) => {
@@ -260,6 +333,7 @@ export default function StatsPage() {
           </p>
         </div>
         {(userRole?.toLowerCase() === 'team leader' ||
+          userRole?.toLowerCase() === 'supervisor' ||
           userRole?.toLowerCase() === 'admin' ||
           userRole?.toLowerCase() === 'manager') && (
           <button
@@ -329,12 +403,78 @@ export default function StatsPage() {
         </div>
       )}
 
+      {userRole?.toLowerCase() !== 'agent' && (
+        <div className="rounded-lg border border-outline-variant/60 bg-surface-dim p-5">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <label htmlFor="statsWeek" className="mb-2 block text-sm font-medium text-on-surface">
+                Week
+              </label>
+              <input
+                id="statsWeek"
+                type="number"
+                min="1"
+                value={selectedWeek}
+                onChange={e => setSelectedWeek(Number(e.target.value))}
+                className="w-full rounded-lg border border-outline bg-surface px-4 py-2.5 text-on-surface outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
+              />
+            </div>
+
+            <div>
+              <p className="mb-2 block text-sm font-medium text-on-surface">Showing Range</p>
+              <div className="rounded-lg bg-surface px-4 py-2.5 text-on-surface">
+                Week {selectedWeek} • {displayedDateRange}
+              </div>
+            </div>
+          </div>
+          <p className="mt-3 text-sm text-on-surface-variant">
+            Weeks start on Sunday. The range shown is based on the latest available stats for the selected week.
+          </p>
+        </div>
+      )}
+
+      {userRole?.toLowerCase() === 'agent' && !isLoading && (
+        <div className="rounded-2xl border border-outline-variant/60 bg-surface p-5 shadow-sm">
+          <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div>
+              <p className="text-label-md font-semibold uppercase text-primary-container">
+                Viewing Week
+              </p>
+              <h2 className="mt-1 font-hanken text-headline-md font-bold text-on-surface">
+                Week {selectedWeek}
+              </h2>
+              <p className="mt-1 text-sm text-on-surface-variant">
+                {displayedDateRange}
+              </p>
+            </div>
+
+            <div className="w-full md:w-56">
+              <label htmlFor="agentStatsWeek" className="mb-2 block text-xs font-medium uppercase tracking-wide text-on-surface-variant">
+                Week
+              </label>
+              <select
+                id="agentStatsWeek"
+                value={selectedWeek}
+                onChange={e => setSelectedWeek(Number(e.target.value))}
+                className="w-full rounded-lg border border-outline bg-surface px-3 py-2.5 text-sm font-semibold text-on-surface outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
+              >
+                {weekOptions.map(week => (
+                  <option key={week} value={week}>
+                    Week {week}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Stats Table */}
       {userRole?.toLowerCase() === 'agent' ? (
         stats.length === 0 ? (
           <div className="flex flex-col items-center justify-center rounded-lg border border-outline-variant/60 bg-surface/70 py-16">
             <AlertCircle size={40} className="mb-4 text-on-surface-variant/40" />
-            <p className="text-on-surface-variant">No scorecard available yet.</p>
+            <p className="text-on-surface-variant">No scorecard available for Week {selectedWeek} ({displayedDateRange}).</p>
           </div>
         ) : (
           <div className="rounded-2xl border border-outline-variant/60 bg-surface p-5 shadow-sm">
@@ -349,6 +489,9 @@ export default function StatsPage() {
                 <p className="mt-1 text-sm text-on-surface-variant">
                   {latestAgentStat.supervisor ? `Team Leader: ${latestAgentStat.supervisor}` : 'Performance metrics'}
                 </p>
+                <p className="mt-1 text-sm text-on-surface-variant">
+                  Week {latestAgentStat.week} • {getStatsWeekRangeLabel(latestAgentStat.week, latestAgentStat.range)}
+                </p>
               </div>
               <div className="rounded-xl bg-surface-container-low p-4">
                 <p className="text-xs font-medium uppercase tracking-wide text-on-surface-variant">
@@ -360,29 +503,117 @@ export default function StatsPage() {
               </div>
             </div>
 
-            <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-              {SCORECARD_METRICS.map(metric => {
-                const value = latestAgentStat[metric.field as keyof Stat]
-                const status = getScorecardStatus(metric.field, value)
+            <div className="mt-6 space-y-8">
+              {SCORECARD_METRIC_TIERS.map(tier => {
+                const gridClass = tier.style === 'primary'
+                  ? 'grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5'
+                  : tier.style === 'secondary'
+                    ? 'grid grid-cols-1 gap-4 sm:grid-cols-3'
+                    : 'grid grid-cols-2 gap-3 xl:grid-cols-5'
 
                 return (
-                  <div
-                    key={metric.field}
-                    className="rounded-xl border border-outline-variant/60 bg-surface-dim p-5"
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <p className="text-sm font-semibold text-on-surface">{metric.label}</p>
-                        <p className="mt-1 text-xs text-on-surface-variant">{metric.description}</p>
-                      </div>
-                      <span className={`rounded-full px-3 py-1 text-xs font-semibold ${status.className}`}>
-                        {status.label}
-                      </span>
+                  <section key={tier.title} className="space-y-3">
+                    <div className="flex items-center gap-3">
+                      <div className={`h-px flex-1 ${tier.style === 'primary' ? 'bg-primary-container/40' : 'bg-outline-variant'}`} />
+                      <h3 className="text-sm font-bold uppercase tracking-[0.18em] text-on-surface-variant">
+                        {tier.title}
+                      </h3>
+                      <div className={`h-px flex-1 ${tier.style === 'primary' ? 'bg-primary-container/40' : 'bg-outline-variant'}`} />
                     </div>
-                    <div className="mt-5 text-3xl font-bold text-on-surface">
-                      {formatStatValue(value, metric.field)}
+
+                    <div className={gridClass}>
+                      {tier.fields.map(field => {
+                        const metric = SCORECARD_METRICS.find(item => item.field === field)
+                        if (!metric) return null
+
+                        const value = latestAgentStat[metric.field as keyof Stat]
+                        const formattedValue = formatAgentMetricValue(metric.field, value)
+                        if (!formattedValue) return null
+
+                        const status = getScorecardStatus(metric.field, value)
+                        if (status.label === 'N/A' && formattedValue === '—') return null
+
+                        if (tier.style === 'primary') {
+                          return (
+                            <div
+                              key={metric.field}
+                              className="rounded-2xl border-2 border-primary-container/30 bg-gradient-to-br from-primary-container to-inverse-primary p-5 shadow-lg shadow-primary-container/20"
+                            >
+                              <div className="flex items-start justify-between gap-4">
+                                <div>
+                                  <p className="text-sm font-bold uppercase tracking-[0.16em] text-on-primary-container">
+                                    {metric.label}
+                                  </p>
+                                  <p className="mt-1 text-xs text-white/80">
+                                    {metric.description}
+                                  </p>
+                                </div>
+                                {status.label !== 'N/A' && (
+                                  <span className="rounded-full bg-surface px-3 py-1 text-xs font-bold text-on-surface">
+                                    {status.label}
+                                  </span>
+                                )}
+                              </div>
+                              <div className={`mt-5 break-words text-4xl font-black tracking-tight sm:text-5xl ${status.label === 'Below Target' ? 'text-red-200' : 'text-white'}`}>
+                                {formattedValue}
+                              </div>
+                            </div>
+                          )
+                        }
+
+                        if (tier.style === 'secondary') {
+                          return (
+                            <div
+                              key={metric.field}
+                              className="rounded-xl border border-primary-container/20 bg-primary-container/10 p-5"
+                            >
+                              <div className="flex items-start justify-between gap-4">
+                                <div>
+                                  <p className="text-sm font-semibold text-primary-container">
+                                    {metric.label}
+                                  </p>
+                                  <p className="mt-1 text-xs text-on-surface-variant">
+                                    {metric.description}
+                                  </p>
+                                </div>
+                                {status.label !== 'N/A' && (
+                                  <span className={`rounded-full px-3 py-1 text-xs font-bold ${status.className}`}>
+                                    {status.label}
+                                  </span>
+                                )}
+                              </div>
+                              <div className={`mt-4 text-2xl font-bold tracking-tight sm:text-3xl ${status.label === 'Below Target' ? 'text-red-600' : 'text-on-surface'}`}>
+                                {formattedValue}
+                              </div>
+                            </div>
+                          )
+                        }
+
+                        return (
+                          <div
+                            key={metric.field}
+                            className="rounded-lg border border-outline-variant/60 bg-surface p-4"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className="text-xs font-semibold uppercase tracking-wide text-on-surface-variant">
+                                  {metric.label}
+                                </p>
+                              </div>
+                              {status.label !== 'N/A' && (
+                                <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${status.className}`}>
+                                  {status.label}
+                                </span>
+                              )}
+                            </div>
+                            <div className={`mt-3 text-lg font-semibold ${status.label === 'Below Target' ? 'text-red-600' : 'text-on-surface'}`}>
+                              {formattedValue}
+                            </div>
+                          </div>
+                        )
+                      })}
                     </div>
-                  </div>
+                  </section>
                 )
               })}
             </div>
@@ -392,11 +623,15 @@ export default function StatsPage() {
         <div className="flex flex-col items-center justify-center rounded-lg border border-outline-variant/60 bg-surface/70 py-16">
           <AlertCircle size={40} className="mb-4 text-on-surface-variant/40" />
           <p className="text-on-surface-variant">
-            {searchQuery ? 'No agents found matching your search.' : 'No stats available.'}
+            {searchQuery ? `No agents found matching your search for Week ${selectedWeek} (${displayedDateRange}).` : `No stats available for Week ${selectedWeek} (${displayedDateRange}).`}
           </p>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-outline-variant/60 bg-surface">
+        <>
+          <div className="mb-3 rounded-lg border border-outline-variant/60 bg-surface-dim p-4 text-sm text-on-surface-variant">
+            Showing Week {selectedWeek} • {displayedDateRange}
+          </div>
+          <div className="overflow-x-auto rounded-lg border border-outline-variant/60 bg-surface">
           <table className="w-full border-collapse">
             <thead className="border-b border-outline-variant/60 bg-surface-dim">
               <tr>
@@ -419,7 +654,8 @@ export default function StatsPage() {
               ))}
             </tbody>
           </table>
-        </div>
+          </div>
+        </>
       )}
 
       {/* Legend */}

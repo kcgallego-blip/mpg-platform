@@ -1,8 +1,16 @@
 'use client'
 
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAuthStore } from '@/lib/authStore'
-import { useRouter } from 'next/navigation'
+import {
+  formatStatsDate,
+  getStatsRangeFromDate,
+  getStatsWeekDateOptions,
+  getStatsWeekNumber,
+  getStatsWeekRange,
+  getStatsWeekRangeDates,
+  getStatsWeekRangeLabel,
+} from '@/lib/statsUtils'
 import {
   Upload,
   AlertCircle,
@@ -14,7 +22,6 @@ import {
 
 export default function StatsUploadPage() {
   const { user } = useAuthStore()
-  const router = useRouter()
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -25,11 +32,35 @@ export default function StatsUploadPage() {
     failed: number
     message: string
   } | null>(null)
+  const [selectedWeek, setSelectedWeek] = useState(() => getStatsWeekNumber())
+  const [selectedEndDate, setSelectedEndDate] = useState(() =>
+    formatStatsDate(getStatsWeekRangeDates(getStatsWeekNumber(), getStatsWeekRange()).endDate)
+  )
+  const selectedRange = useMemo(
+    () => getStatsRangeFromDate(selectedWeek, selectedEndDate),
+    [selectedWeek, selectedEndDate]
+  )
+  const selectedDateRange = useMemo(
+    () => getStatsWeekRangeLabel(selectedWeek, selectedRange),
+    [selectedWeek, selectedRange]
+  )
+  const weekDateOptions = useMemo(() => getStatsWeekDateOptions(selectedWeek), [selectedWeek])
+  const weekStart = useMemo(() => getStatsWeekRangeDates(selectedWeek, 1).startDate, [selectedWeek])
+  const weekEnd = useMemo(() => getStatsWeekRangeDates(selectedWeek, 7).endDate, [selectedWeek])
+
+  useEffect(() => {
+    if (!weekDateOptions.includes(selectedEndDate)) {
+      setSelectedEndDate(weekDateOptions[weekDateOptions.length - 1])
+    }
+  }, [selectedWeek, selectedEndDate, weekDateOptions])
 
   // Check authorization
   const userRole = user?.role?.toLowerCase()
   const isAuthorized =
-    userRole === 'admin' || userRole === 'manager' || userRole === 'team leader'
+    userRole === 'admin' ||
+    userRole === 'manager' ||
+    userRole === 'team leader' ||
+    userRole === 'supervisor'
 
   if (!isAuthorized) {
     return (
@@ -39,7 +70,7 @@ export default function StatsUploadPage() {
           <div>
             <p className="font-medium text-error">Access Denied</p>
             <p className="text-sm text-error/80">
-              Only Team Leaders and Admins can upload stats data.
+              Only Team Leaders, Supervisors, Managers, and Admins can upload stats data.
             </p>
           </div>
         </div>
@@ -87,6 +118,16 @@ export default function StatsUploadPage() {
       return
     }
 
+    if (!Number.isInteger(selectedWeek) || selectedWeek < 1) {
+      setError('Please select a valid stats week')
+      return
+    }
+
+    if (!Number.isInteger(selectedRange) || selectedRange < 1 || selectedRange > 7) {
+      setError('Please select a valid stats range end date')
+      return
+    }
+
     try {
       setIsLoading(true)
       setError('')
@@ -99,7 +140,11 @@ export default function StatsUploadPage() {
       const response = await fetch('/api/stats/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ csvContent }),
+        body: JSON.stringify({
+          csvContent,
+          week: selectedWeek,
+          range: selectedRange,
+        }),
       })
 
       if (!response.ok) {
@@ -121,7 +166,7 @@ export default function StatsUploadPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [file])
+  }, [file, selectedWeek, selectedRange])
 
   return (
     <div className="space-y-6 pb-8">
@@ -134,7 +179,7 @@ export default function StatsUploadPage() {
           Upload Stats Data
         </h1>
         <p className="mt-2 max-w-3xl text-on-surface-variant">
-          Import agent performance metrics from a CSV file. The file format must match the expected columns.
+          Import agent performance metrics from a CSV file. The file must include a Name column. If Supervisor is missing, the uploader is used as the team leader.
         </p>
       </div>
 
@@ -167,6 +212,64 @@ export default function StatsUploadPage() {
           </div>
         </div>
       )}
+
+      {/* Import Period */}
+      <div className="rounded-lg border border-outline-variant/60 bg-surface-dim p-6">
+        <h3 className="mb-4 font-semibold text-on-surface">Import Period</h3>
+        <div className="grid gap-4 md:grid-cols-3">
+          <div>
+            <label htmlFor="statsWeek" className="mb-2 block text-sm font-medium text-on-surface">
+              Week
+            </label>
+            <input
+              id="statsWeek"
+              type="number"
+              min="1"
+              value={selectedWeek}
+              onChange={e => setSelectedWeek(Number(e.target.value))}
+              className="w-full rounded-lg border border-outline bg-surface px-4 py-2.5 text-on-surface outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="statsRangeEndDate" className="mb-2 block text-sm font-medium text-on-surface">
+              Range End Date
+            </label>
+            <select
+              id="statsRangeEndDate"
+              value={selectedEndDate}
+              onChange={e => setSelectedEndDate(e.target.value)}
+              className="w-full rounded-lg border border-outline bg-surface px-4 py-2.5 text-on-surface outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
+            >
+              {weekDateOptions.map(date => {
+                const parsedDate = new Date(`${date}T00:00:00`)
+                const label = new Intl.DateTimeFormat('en-PH', {
+                  weekday: 'short',
+                  month: 'short',
+                  day: 'numeric',
+                }).format(parsedDate)
+                const isWeekStart = date === formatStatsDate(weekStart)
+                const isWeekEnd = date === formatStatsDate(weekEnd)
+                return (
+                  <option key={date} value={date}>
+                    {label}{isWeekStart ? ' (week start)' : ''}{isWeekEnd ? ' (week end)' : ''}
+                  </option>
+                )
+              })}
+            </select>
+          </div>
+
+          <div>
+            <p className="mb-2 block text-sm font-medium text-on-surface">Selected Import Range</p>
+            <div className="rounded-lg bg-surface px-4 py-2.5 text-on-surface">
+              Week {selectedWeek} • {selectedDateRange}
+            </div>
+          </div>
+        </div>
+        <p className="mt-3 text-sm text-on-surface-variant">
+          Weeks start on Sunday. Importing an existing week overwrites all stats for that week.
+        </p>
+      </div>
 
       {/* File Upload Area */}
       <div className="rounded-lg border-2 border-dashed border-outline-variant bg-surface-dim p-8 transition">
@@ -268,7 +371,7 @@ export default function StatsUploadPage() {
             <tbody>
               <tr className="border-b border-outline-variant/30">
                 <td className="px-4 py-2 text-on-surface">Supervisor</td>
-                <td className="px-4 py-2 text-on-surface-variant">Text</td>
+                <td className="px-4 py-2 text-on-surface-variant">Text, optional</td>
                 <td className="px-4 py-2 font-mono text-on-surface">Charlene Esparza</td>
               </tr>
               <tr className="border-b border-outline-variant/30">

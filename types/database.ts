@@ -226,6 +226,8 @@ export interface Database {
           transactions: number | null
           productive_hours: string | null
           tph: number | null
+          week: number
+          range: number
           created_at: string
           updated_at: string
         }
@@ -251,6 +253,8 @@ export interface Database {
           transactions?: number | null
           productive_hours?: string | null
           tph?: number | null
+          week?: number
+          range?: number
           created_at?: string
           updated_at?: string
         }
@@ -275,6 +279,8 @@ export interface Database {
           transactions?: number | null
           productive_hours?: string | null
           tph?: number | null
+          week?: number
+          range?: number
           updated_at?: string
         }
       }

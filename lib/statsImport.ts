@@ -7,6 +7,7 @@
  */
 
 import { supabase } from './supabase'
+import { getStatsWeekNumber, getStatsWeekRange } from './statsUtils'
 
 export interface CSVStat {
   Supervisor: string
@@ -58,7 +59,7 @@ export function parseCSV(csvContent: string): CSVStat[] {
 /**
  * Convert CSV stat to database format
  */
-function convertToDbFormat(csvStat: CSVStat) {
+function convertToDbFormat(csvStat: CSVStat, week: number, range: number) {
   return {
     supervisor: csvStat.Supervisor,
     name: csvStat.Name,
@@ -80,14 +81,33 @@ function convertToDbFormat(csvStat: CSVStat) {
     transactions: parseInt(csvStat.Transactions || '0') || null,
     productive_hours: csvStat['Productive Hours'] || null,
     tph: parseFloat(csvStat.TPH || '0') || null,
+    week,
+    range,
   }
 }
 
 /**
  * Import stats from CSV content
  */
-export async function importStatsFromCSV(csvContent: string): Promise<{ success: number; failed: number; errors: string[] }> {
+export async function importStatsFromCSV(
+  csvContent: string,
+  week = getStatsWeekNumber(),
+  range = getStatsWeekRange(),
+  supervisor = ''
+): Promise<{ success: number; failed: number; errors: string[] }> {
   try {
+    if (!Number.isInteger(week) || week < 1) {
+      return { success: 0, failed: 0, errors: ['Week must be a positive integer'] }
+    }
+
+    if (!Number.isInteger(range) || range < 1 || range > 7) {
+      return { success: 0, failed: 0, errors: ['Range must be an integer from 1 to 7'] }
+    }
+
+    if (!supervisor.trim()) {
+      return { success: 0, failed: 0, errors: ['Supervisor must be provided for script imports'] }
+    }
+
     const records = parseCSV(csvContent)
     let success = 0
     let failed = 0
@@ -95,18 +115,50 @@ export async function importStatsFromCSV(csvContent: string): Promise<{ success:
 
     // Convert to database format
     const dbRecords = records
-      .filter(r => r.Name && r.Supervisor) // Skip empty rows
-      .map(r => convertToDbFormat(r))
+      .filter(r => r.Name)
+      .map(r => convertToDbFormat({ ...r, Supervisor: r.Supervisor || supervisor }, week, range))
+
+    const { data: existingRows, error: fetchExistingError } = await supabase
+      .from('stats')
+      .select('*')
+      .eq('week', week)
+
+    if (fetchExistingError) {
+      return { success: 0, failed: 0, errors: [fetchExistingError.message] }
+    }
+
+    const { error: deleteError } = await supabase.from('stats').delete().eq('week', week)
+
+    if (deleteError) {
+      return { success: 0, failed: 0, errors: [deleteError.message] }
+    }
 
     // Batch insert records
     const batchSize = 100
+    let restoreAttempted = false
     for (let i = 0; i < dbRecords.length; i += batchSize) {
       const batch = dbRecords.slice(i, i + batchSize)
-      const { error } = await supabase.from('stats').insert(batch).select()
+      const { error } = await supabase.from('stats').insert(batch)
 
       if (error) {
         failed += batch.length
         errors.push(`Batch ${Math.floor(i / batchSize)}: ${error.message}`)
+
+        if (!restoreAttempted && existingRows && existingRows.length > 0) {
+          const { error: deletePartialError } = await supabase.from('stats').delete().eq('week', week)
+          if (!deletePartialError) {
+            const { error: restoreError } = await supabase.from('stats').insert(existingRows)
+            if (restoreError) {
+              errors.push(`Failed to restore previous stats: ${restoreError.message}`)
+            }
+          } else {
+            errors.push(`Failed to clear partial import: ${deletePartialError.message}`)
+          }
+
+          restoreAttempted = true
+        }
+
+        break
       } else {
         success += batch.length
       }

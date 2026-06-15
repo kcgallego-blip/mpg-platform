@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
+import { getStatsWeekNumber, getStatsWeekRange } from '@/lib/statsUtils'
 
 const FUZZY_NAME_MATCH_THRESHOLD = 60
+
+const parseWeek = (value: string | null) => {
+  if (value === null) return null
+  const week = Number(value)
+  return Number.isInteger(week) && week > 0 ? week : undefined
+}
 
 const normalizeNameForMatch = (value: string | null | undefined) =>
   (value || '')
@@ -89,6 +96,14 @@ export async function GET(request: NextRequest) {
     const supervisorFilter = searchParams.get('supervisor')
     const sortBy = searchParams.get('sortBy') || 'name'
     const sortOrder = searchParams.get('sortOrder') || 'asc'
+    const weekParam = searchParams.get('week')
+    const parsedWeek = parseWeek(weekParam)
+
+    if (weekParam !== null && parsedWeek === undefined) {
+      return NextResponse.json({ error: 'Week must be a positive integer' }, { status: 400 })
+    }
+
+    const selectedWeek = parsedWeek ?? getStatsWeekNumber()
 
     // Validate sort parameters
     const validSortFields = [
@@ -99,20 +114,32 @@ export async function GET(request: NextRequest) {
       'hold',
       'talk_time',
       'csat_score',
+      'dsat',
       'nps_score',
       'mod',
+      'mod_value',
       'fcr',
+      'fcr_value',
+      'surveys_answered',
       'tph',
+      'week',
+      'range',
       'created_at',
     ]
     const safeSortBy = validSortFields.includes(sortBy) ? sortBy : 'name'
     const safeOrder = sortOrder.toLowerCase() === 'desc' ? false : true
 
     const isAgent = userRole.toLowerCase() === 'agent'
+    const isTeamLeader = userRole.toLowerCase() === 'team leader'
+    const isSupervisor = userRole.toLowerCase() === 'supervisor'
+    const isAdminOrManager = ['admin', 'manager'].includes(userRole.toLowerCase())
     const agentNameTokens = getNameTokens(userName)
 
     // Build the base query
-    let query = supabase.from('stats').select('*')
+    let query = supabase
+      .from('stats')
+      .select('*')
+      .eq('week', selectedWeek)
 
     // Apply role-based filtering
     if (isAgent) {
@@ -123,14 +150,13 @@ export async function GET(request: NextRequest) {
       } else {
         query = query.eq('name', userName)
       }
-    } else if (
-      userRole.toLowerCase() === 'team leader' ||
-      userRole.toLowerCase() === 'supervisor'
-    ) {
-      // Team leaders can see stats of agents under them
+    } else if (isTeamLeader || isSupervisor) {
+      // Team leaders and supervisors can see stats of agents under them
       query = query.eq('supervisor', dbUser.name || userData.name)
+    } else if (isAdminOrManager && supervisorFilter && supervisorFilter !== 'all') {
+      query = query.eq('supervisor', supervisorFilter)
     }
-    // Admin/Manager roles can see all stats (no additional filter)
+    // Admin/Manager roles can see all stats when no supervisor filter is selected
 
     query = query.order(safeSortBy, { ascending: safeOrder }).order('created_at', { ascending: false })
 
@@ -141,7 +167,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to fetch stats' }, { status: 500 })
     }
 
-    const stats = isAgent
+    const statsForWeek = isAgent
       ? (rawStats || [])
           .filter(stat => getFuzzyNameScore(stat.name, userName) >= FUZZY_NAME_MATCH_THRESHOLD)
           .sort((a, b) => {
@@ -151,26 +177,27 @@ export async function GET(request: NextRequest) {
           })
       : rawStats || []
 
+    const selectedRange = statsForWeek.length > 0
+      ? Math.max(...statsForWeek.map(stat => stat.range))
+      : getStatsWeekRange()
+
+    const stats = statsForWeek.filter(stat => stat.range === selectedRange)
+
     // If team leader/supervisor, also return list of unique supervisors for filtering
     let supervisors: string[] = []
     if (userRole.toLowerCase() !== 'agent') {
-      const { data: supervisorData } = await supabase
-        .from('stats')
-        .select('supervisor')
-        .order('supervisor', { ascending: true })
-
-      // Get unique supervisors and filter out nulls
       const uniqueSupervisors = Array.from(
-        new Set(supervisorData?.map(s => s.supervisor).filter(s => s) || [])
+        new Set(statsForWeek.map(stat => stat.supervisor).filter(Boolean))
       )
       supervisors = uniqueSupervisors
     }
 
     return NextResponse.json({
-      stats: stats || [],
+      stats,
       supervisors,
       userRole,
       userName,
+      range: selectedRange,
     })
   } catch (error) {
     console.error('Stats API error:', error)
