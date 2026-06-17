@@ -165,7 +165,7 @@ export default function StatsPage() {
   const loadStats = useCallback(async () => {
     if (!user?.email) {
       setIsLoading(false)
-      router.push('/app/login')
+      router.push('/login')
       return
     }
 
@@ -185,7 +185,7 @@ export default function StatsPage() {
 
       if (!response.ok) {
         if (response.status === 401) {
-          router.push('/app/login')
+          router.push('/login')
           return
         }
         throw new Error('Failed to fetch stats')
