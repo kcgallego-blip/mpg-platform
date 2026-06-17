@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getAuthCookieUser } from '@/lib/authCookie'
+import { getAuthenticatedDbUser } from '@/lib/sessionAuth'
 import { supabase } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
@@ -38,25 +38,15 @@ const getEmailFallbackName = (email: string) => {
 }
 
 const getAuthenticatedUser = async (request: NextRequest) => {
-  const cookieUser = getAuthCookieUser(request)
+  const dbUser = await getAuthenticatedDbUser(request)
 
-  if (!cookieUser?.email) {
-    return null
-  }
-
-  const { data: dbUser, error } = await supabase
-    .from('users')
-    .select('role, is_active')
-    .eq('email', cookieUser.email)
-    .single()
-
-  if (error || !dbUser || dbUser.is_active !== true || !dbUser.role) {
+  if (!dbUser || !dbUser.role) {
     return null
   }
 
   return {
-    email: cookieUser.email,
-    role: dbUser.role as string,
+    email: dbUser.email,
+    role: dbUser.role,
   }
 }
 

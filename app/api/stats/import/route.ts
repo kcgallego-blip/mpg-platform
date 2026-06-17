@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getAuthCookieUser } from '@/lib/authCookie'
+import { getAuthenticatedDbUser } from '@/lib/sessionAuth'
 import { supabase } from '@/lib/supabase'
 
 const parseWeek = (value: unknown) => {
@@ -18,29 +18,19 @@ const parseRange = (value: unknown) => {
  */
 export async function POST(request: NextRequest) {
   try {
-    const cookieUser = getAuthCookieUser(request)
+    const dbUser = await getAuthenticatedDbUser(request)
 
-    if (!cookieUser?.email) {
+    if (!dbUser) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
     }
 
     // Verify user is admin (basic check - could be enhanced with proper role system)
-    const { data: dbUser, error: roleError } = await supabase
-      .from('users')
-      .select('role, name, is_active')
-      .eq('email', cookieUser.email)
-      .single()
-
-    if (roleError || !dbUser || dbUser.is_active !== true) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 })
-    }
-
     const userRole = dbUser.role?.toLowerCase()
     if (!['admin', 'manager', 'team leader', 'supervisor'].includes(userRole || '')) {
       return NextResponse.json({ error: 'Unauthorized - Admin, Manager, Team Leader, or Supervisor only' }, { status: 403 })
     }
 
-    const defaultSupervisor = dbUser.name || cookieUser.name
+    const defaultSupervisor = dbUser.name || ''
 
     // Parse request body
     const body = await request.json()
