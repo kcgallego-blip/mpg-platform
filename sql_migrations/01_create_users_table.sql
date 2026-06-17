@@ -2,6 +2,7 @@
 CREATE TABLE IF NOT EXISTS public.users (
   email TEXT PRIMARY KEY,
   name TEXT,
+  password_hash TEXT,
   role TEXT DEFAULT 'Agent',
   registered_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   access TEXT,

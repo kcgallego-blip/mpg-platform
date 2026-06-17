@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getAuthCookieUser } from '@/lib/authCookie'
 import { supabase } from '@/lib/supabase'
 
 const parseWeek = (value: unknown) => {
@@ -17,28 +18,20 @@ const parseRange = (value: unknown) => {
  */
 export async function POST(request: NextRequest) {
   try {
-    // Check authentication
-    const authCookie = request.cookies.get('webex_auth')
+    const cookieUser = getAuthCookieUser(request)
 
-    if (!authCookie) {
+    if (!cookieUser?.email) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
-    }
-
-    let userData
-    try {
-      userData = JSON.parse(authCookie.value)
-    } catch {
-      return NextResponse.json({ error: 'Invalid auth data' }, { status: 401 })
     }
 
     // Verify user is admin (basic check - could be enhanced with proper role system)
     const { data: dbUser, error: roleError } = await supabase
       .from('users')
-      .select('role, name')
-      .eq('email', userData.email)
+      .select('role, name, is_active')
+      .eq('email', cookieUser.email)
       .single()
 
-    if (roleError || !dbUser) {
+    if (roleError || !dbUser || dbUser.is_active !== true) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
@@ -47,7 +40,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized - Admin, Manager, Team Leader, or Supervisor only' }, { status: 403 })
     }
 
-    const defaultSupervisor = dbUser.name || userData.name
+    const defaultSupervisor = dbUser.name || cookieUser.name
 
     // Parse request body
     const body = await request.json()
@@ -85,7 +78,7 @@ export async function POST(request: NextRequest) {
 
     for (let i = 1; i < lines.length; i++) {
       const values = lines[i].split(',').map(v => v.trim())
-      
+
       // Skip empty rows
       if (values.every(v => !v)) continue
 

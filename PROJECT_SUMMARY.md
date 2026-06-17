@@ -149,7 +149,8 @@ Visit: http://localhost:3000
 - Dashboard & Reports links
 - Logout button
 - Mobile menu
-- Settings button
+
+
 
 ## 🔧 Technology Stack
 

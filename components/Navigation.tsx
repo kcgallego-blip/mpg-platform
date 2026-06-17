@@ -1,11 +1,15 @@
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/lib/authStore'
-import { LogOut, Settings, User, LayoutDashboard, Ticket, FileText, ChevronDown, ChevronRight, Users, BarChart3, TrendingUp } from 'lucide-react'
-import { useState } from 'react'
+import { LogOut, User, LayoutDashboard, Ticket, FileText, ChevronDown, ChevronRight, Users, BarChart3, TrendingUp, Wrench } from 'lucide-react'
+import { useState, type ComponentType } from 'react'
 import Image from 'next/image'
 
-const allNavItems = [
+type IconComponent = ComponentType<any>
+type NavChild = { href: string; icon: IconComponent; label: string }
+type NavItem = { href: string; icon: IconComponent; label: string } | { label: string; icon: IconComponent; children: NavChild[] }
+
+const allNavItems: NavItem[] = [
   { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { href: '/dashboard/stats', icon: TrendingUp, label: 'Stats' },
   { href: '/dashboard/productivity', icon: BarChart3, label: 'Productivity' },
@@ -19,10 +23,24 @@ const allNavItems = [
   },
   {
     label: 'Utilities',
-    icon: Settings,
+    icon: Wrench,
     children: [
       { href: '/dashboard/utilities/ledger', icon: FileText, label: 'Ledger' },
       { href: '/dashboard/utilities/accounts', icon: Users, label: 'Accounts' },
+    ],
+  },
+]
+
+const managerNavItems: NavItem[] = [
+  { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+  { href: '/dashboard/stats', icon: TrendingUp, label: 'Stats' },
+  { href: '/dashboard/productivity', icon: BarChart3, label: 'Productivity' },
+  {
+    label: 'IT',
+    icon: Ticket,
+    children: [
+      { href: '/dashboard/it/submit-ticket', icon: FileText, label: 'Submit Ticket' },
+      { href: '/dashboard/it/ticket-reports', icon: Ticket, label: 'Ticket Reports' },
     ],
   },
 ]
@@ -38,34 +56,10 @@ function getNavItemsByRole(role: string | null | undefined) {
     case 'IT':
     case 'Operations Manager':
     case 'Supervisor':
-      return [
-        { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-        { href: '/dashboard/stats', icon: TrendingUp, label: 'Stats' },
-        { href: '/dashboard/productivity', icon: BarChart3, label: 'Productivity' },
-        {
-          label: 'IT',
-          icon: Ticket,
-          children: [
-            { href: '/dashboard/it/submit-ticket', icon: FileText, label: 'Submit Ticket' },
-            { href: '/dashboard/it/ticket-reports', icon: Ticket, label: 'Ticket Reports' },
-          ],
-        },
-      ]
+      return managerNavItems
 
     case 'Team Leader':
-      return [
-        { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-        { href: '/dashboard/stats', icon: TrendingUp, label: 'Stats' },
-        { href: '/dashboard/productivity', icon: BarChart3, label: 'Productivity' },
-        {
-          label: 'IT',
-          icon: Ticket,
-          children: [
-            { href: '/dashboard/it/submit-ticket', icon: FileText, label: 'Submit Ticket' },
-            { href: '/dashboard/it/ticket-reports', icon: Ticket, label: 'Ticket Reports' },
-          ],
-        },
-      ]
+      return managerNavItems
     case 'Agent':
       return [
         { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
@@ -89,8 +83,8 @@ export default function Navigation() {
   }
 
   const toggleExpand = (label: string) => {
-    setExpandedItems(prev => 
-      prev.includes(label) 
+    setExpandedItems(prev =>
+      prev.includes(label)
         ? prev.filter(item => item !== label)
         : [...prev, label]
     )
@@ -98,11 +92,9 @@ export default function Navigation() {
 
   return (
     <>
-      {/* Top Header */}
       <header className="sticky top-0 z-50 bg-primary-container/90 backdrop-blur-glass-md border-b border-outline/20">
         <div className="max-w-container mx-auto px-gutter py-4">
           <div className="flex items-center justify-between">
-            {/* Logo */}
             <Link href="/dashboard" className="font-hanken text-2xl font-bold text-primary-container flex items-center gap-2">
               <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center p-1.5">
                 <Image
@@ -116,11 +108,7 @@ export default function Navigation() {
               MPG
             </Link>
 
-            {/* User Menu */}
             <div className="flex items-center gap-4">
-              <button className="p-2 rounded-lg hover:bg-surface-container-high transition-colors">
-                <Settings size={20} className="text-on-primary-container" />
-              </button>
               <div className="relative group">
                 <button className="flex items-center gap-2 px-4 py-2 rounded-lg hover:bg-surface-container-high transition-colors">
                   <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center overflow-hidden">
@@ -137,7 +125,6 @@ export default function Navigation() {
                   <span className="text-on-primary-container text-sm font-medium">{user?.email?.split('@')[0]}</span>
                 </button>
 
-                {/* Dropdown */}
                 <div className="absolute right-0 mt-2 w-48 glass-effect rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 p-2">
                   <button
                     onClick={handleLogout}
@@ -153,11 +140,10 @@ export default function Navigation() {
         </div>
       </header>
 
-      {/* Left Sidebar */}
       <aside className="fixed top-20 bottom-0 left-0 w-64 bg-surface-container/30 backdrop-blur-glass-lg border-r border-outline/20 z-40 overflow-y-auto">
         <nav className="p-4 space-y-2">
           {navItems.map((item) => {
-            if (item.children) {
+            if ('children' in item) {
               const isExpanded = expandedItems.includes(item.label)
               return (
                 <div key={item.label}>

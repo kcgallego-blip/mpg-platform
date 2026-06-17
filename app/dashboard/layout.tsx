@@ -11,12 +11,10 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const initAuth = async () => {
-      // First rehydrate from local storage
       rehydrateFromStorage()
-      // Then verify with server
       await checkAuth()
     }
-    
+
     initAuth()
   }, [checkAuth, rehydrateFromStorage])
 
@@ -61,7 +59,6 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen relative">
-      {/* Mesh Gradient Background - Very light colors */}
       <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none">
         <div className="absolute inset-0 bg-gradient-to-br from-white via-blue-50/20 to-white" />
         <div className="absolute top-0 left-1/4 w-96 h-96 bg-primary-container/5 rounded-full blur-3xl animate-blob" />
@@ -70,9 +67,11 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
       </div>
       <div className="relative z-10">
         <Navigation />
-        <main className="ml-64 pt-8 px-gutter max-w-container">
-          {children}
-        </main>
+        <div className="relative z-10">
+          <main className="ml-64 pt-8 px-gutter max-w-container">
+            {children}
+          </main>
+        </div>
       </div>
     </div>
   )

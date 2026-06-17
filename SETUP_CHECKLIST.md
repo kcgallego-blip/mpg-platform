@@ -148,7 +148,6 @@ Reports: http://localhost:3000/dashboard/reports
 - [x] Dashboard & Reports links
 - [x] User dropdown menu
 - [x] Logout button
-- [x] Settings button
 - [x] Mobile menu
 - [x] Auth state display
 
@@ -215,7 +214,6 @@ Edit `tailwind.config.js` colors to match your brand:
 
 ### 4. Add More Pages
 Create additional pages under `app/dashboard/`:
-- Settings page
 - Profile page
 - Team management
 - Billing page

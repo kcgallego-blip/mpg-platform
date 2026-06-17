@@ -269,7 +269,7 @@ git push -u origin main
 # ============================================================================
 
 # Add a new page:
-# 1. Create file: app/dashboard/settings/page.tsx
+# 1. Create file: app/dashboard/new-page/page.tsx
 # 2. Add React component
 # 3. Next.js automatically creates route
 

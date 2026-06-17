@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { createSessionToken, setSessionTokenCookie } from '@/lib/sessionToken'
 import { supabase } from '@/lib/supabase'
 
 export async function GET(request: NextRequest) {
@@ -6,7 +7,6 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams
     const code = searchParams.get('code')
     const error = searchParams.get('error')
-    const state = searchParams.get('state')
 
     if (error) {
       return NextResponse.redirect(new URL(`/login?error=${error}`, request.url))
@@ -65,9 +65,9 @@ export async function GET(request: NextRequest) {
     }
 
     const webexUser = await userResponse.json()
-    
+
     // Extract email from Webex response - emails is an array
-    const email = webexUser.emails?.[0] || webexUser.email
+    const email = (webexUser.emails?.[0] || webexUser.email)?.trim().toLowerCase()
     const name = webexUser.displayName || `${webexUser.firstName || ''} ${webexUser.lastName || ''}`.trim()
     const avatar = webexUser.avatar
 
@@ -79,7 +79,7 @@ export async function GET(request: NextRequest) {
 
     const { data: existingUser, error: existingUserError } = await supabase
       .from('users')
-      .select('email, role, access, registered_at')
+      .select('email, role, access, registered_at, is_active')
       .eq('email', email)
       .maybeSingle()
 
@@ -88,30 +88,39 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(new URL('/login?error=db_error', request.url))
     }
 
-    const { error: dbError } = existingUser
-      ? await supabase
-        .from('users')
-        .update({
-          name,
-          token: accessToken,
-          avatar_image: avatar,
-          is_active: true,
-          last_login: now,
-        })
-        .eq('email', email)
-      : await supabase
-        .from('users')
-        .insert({
-          email,
-          name,
-          token: accessToken,
-          avatar_image: avatar,
-          is_active: true,
-          registered_at: now,
-          last_login: now,
-          role: 'Agent',
-          access: null,
-        })
+    if (existingUser?.is_active !== true) {
+      const insertError = existingUser
+        ? null
+        : (await supabase
+          .from('users')
+          .insert({
+            email,
+            name,
+            avatar_image: avatar,
+            is_active: false,
+            registered_at: now,
+            role: 'Agent',
+            access: null,
+          })).error
+
+      if (insertError) {
+        console.error('Database auth user save error:', insertError)
+        return NextResponse.redirect(new URL('/login?error=db_error', request.url))
+      }
+
+      return NextResponse.redirect(new URL('/login?error=approval_required', request.url))
+    }
+
+    const sessionToken = createSessionToken()
+    const { error: dbError } = await supabase
+      .from('users')
+      .update({
+        name,
+        token: sessionToken,
+        avatar_image: avatar,
+        last_login: now,
+      })
+      .eq('email', email)
 
     if (dbError) {
       console.error('Database auth user save error:', dbError)
@@ -119,7 +128,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Create Supabase session
-    const { data: sessionData, error: sessionError } = await supabase.auth.admin.createUser({
+    const { error: sessionError } = await supabase.auth.admin.createUser({
       email: email,
       user_metadata: {
         name: name,
@@ -132,19 +141,8 @@ export async function GET(request: NextRequest) {
       // Continue anyway - user might already exist
     }
 
-    // Set auth cookie with user data
     const response = NextResponse.redirect(new URL('/dashboard', request.url))
-    response.cookies.set('webex_auth', JSON.stringify({ 
-      email, 
-      name, 
-      token: accessToken,
-      avatar_image: avatar
-    }), {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 7, // 7 days
-    })
+    setSessionTokenCookie(response, sessionToken)
 
     return response
   } catch (error) {

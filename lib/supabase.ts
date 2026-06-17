@@ -12,6 +12,7 @@ export type Database = {
         Row: {
           email: string
           name: string | null
+          password_hash: string | null
           role: string | null
           registered_at: string
           access: string | null
@@ -23,6 +24,7 @@ export type Database = {
         Insert: {
           email: string
           name?: string | null
+          password_hash?: string | null
           role?: string | null
           registered_at?: string
           access?: string | null
@@ -33,6 +35,7 @@ export type Database = {
         }
         Update: {
           name?: string | null
+          password_hash?: string | null
           role?: string | null
           access?: string | null
           avatar_image?: string | null
@@ -46,6 +49,7 @@ export type Database = {
           id: string
           name: string
           team_leader: string
+          setting: string | null
           created_at: string
           updated_at: string
         }
@@ -53,6 +57,7 @@ export type Database = {
           id?: string
           name: string
           team_leader: string
+          setting?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -60,6 +65,7 @@ export type Database = {
           id?: string
           name?: string
           team_leader?: string
+          setting?: string | null
           updated_at?: string
         }
       }

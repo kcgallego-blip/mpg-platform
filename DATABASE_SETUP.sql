@@ -13,6 +13,7 @@ create table if not exists public.users (
   email text unique not null,
   company text,
   name text,
+  password_hash text,
   role text default 'Agent',
   avatar_url text,
   phone text,
@@ -94,6 +95,7 @@ alter table public.users enable row level security;
 alter table public.reports enable row level security;
 alter table public.analytics enable row level security;
 alter table public.audit_logs enable row level security;
+
 
 -- USERS POLICIES
 create policy "Users can view own profile" on public.users

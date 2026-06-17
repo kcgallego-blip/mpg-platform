@@ -35,6 +35,7 @@ export interface Database {
           id: string
           name: string
           team_leader: string
+          setting: string | null
           created_at: string
           updated_at: string
         }
@@ -42,6 +43,7 @@ export interface Database {
           id?: string
           name: string
           team_leader: string
+          setting?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -49,6 +51,7 @@ export interface Database {
           id?: string
           name?: string
           team_leader?: string
+          setting?: string | null
           updated_at?: string
         }
       }

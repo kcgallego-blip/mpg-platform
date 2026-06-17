@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getAuthCookieUser } from '@/lib/authCookie'
 import { supabase } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
@@ -37,35 +38,25 @@ const getEmailFallbackName = (email: string) => {
 }
 
 const getAuthenticatedUser = async (request: NextRequest) => {
-  const authCookie = request.cookies.get('webex_auth')
+  const cookieUser = getAuthCookieUser(request)
 
-  if (!authCookie) {
+  if (!cookieUser?.email) {
     return null
   }
 
-  try {
-    const userData = JSON.parse(authCookie.value)
+  const { data: dbUser, error } = await supabase
+    .from('users')
+    .select('role, is_active')
+    .eq('email', cookieUser.email)
+    .single()
 
-    if (!userData?.email) {
-      return null
-    }
-
-    const { data: dbUser, error } = await supabase
-      .from('users')
-      .select('role')
-      .eq('email', userData.email)
-      .single()
-
-    if (error || !dbUser?.role) {
-      return null
-    }
-
-    return {
-      email: userData.email as string,
-      role: dbUser.role as string,
-    }
-  } catch {
+  if (error || !dbUser || dbUser.is_active !== true || !dbUser.role) {
     return null
+  }
+
+  return {
+    email: cookieUser.email,
+    role: dbUser.role as string,
   }
 }
 

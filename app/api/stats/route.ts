@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getAuthCookieUser } from '@/lib/authCookie'
 import { supabase } from '@/lib/supabase'
 import { getStatsWeekNumber, getStatsWeekRange } from '@/lib/statsUtils'
 
@@ -63,32 +64,25 @@ const getFuzzyNameScore = (statsName: string | null | undefined, userName: strin
 
 export async function GET(request: NextRequest) {
   try {
-    const authCookie = request.cookies.get('webex_auth')
+    const cookieUser = getAuthCookieUser(request)
 
-    if (!authCookie) {
+    if (!cookieUser?.email) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
-    }
-
-    let userData
-    try {
-      userData = JSON.parse(authCookie.value)
-    } catch {
-      return NextResponse.json({ error: 'Invalid auth data' }, { status: 401 })
     }
 
     // Get user's role from database
     const { data: dbUser, error: roleError } = await supabase
       .from('users')
-      .select('role, name')
-      .eq('email', userData.email)
+      .select('role, name, is_active')
+      .eq('email', cookieUser.email)
       .single()
 
-    if (roleError || !dbUser) {
+    if (roleError || !dbUser || dbUser.is_active !== true) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
     const userRole = dbUser.role || 'Agent'
-    const userName = dbUser.name || userData.name
+    const userName = dbUser.name || cookieUser.name
 
     // Get query parameters for filtering and searching
     const searchParams = request.nextUrl.searchParams
@@ -152,7 +146,7 @@ export async function GET(request: NextRequest) {
       }
     } else if (isTeamLeader || isSupervisor) {
       // Team leaders and supervisors can see stats of agents under them
-      query = query.eq('supervisor', dbUser.name || userData.name)
+      query = query.eq('supervisor', dbUser.name || cookieUser.name)
     } else if (isAdminOrManager && supervisorFilter && supervisorFilter !== 'all') {
       query = query.eq('supervisor', supervisorFilter)
     }
