@@ -178,15 +178,21 @@ function LoginPageContent() {
         <button
           onClick={handleWebexLogin}
           disabled={isLoading}
-          className="mt-4 w-full py-sm rounded-DEFAULT border border-outline-variant/60 bg-surface/70 text-on-surface font-medium transition-all hover:border-primary hover:bg-surface-container-high disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          className="mt-4 flex w-full items-center justify-center gap-2 rounded-DEFAULT border border-primary/30 bg-primary-container/10 py-sm font-medium text-on-primary-container transition-all hover:border-primary-container hover:bg-primary-container hover:shadow-lg hover:shadow-primary-container/30 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          <LogIn size={18} />
+          <Image
+            src="/webex-logo.svg"
+            alt="Webex logo"
+            width={24}
+            height={24}
+            className="object-contain"
+          />
           Continue with Webex
         </button>
 
         <Link
           href="/register"
-          className="mt-3 flex w-full items-center justify-center gap-2 rounded-DEFAULT border border-outline-variant/60 bg-surface/70 py-sm text-sm font-medium text-on-surface transition-all hover:border-primary hover:bg-surface-container-high"
+          className="mt-3 flex w-full items-center justify-center gap-2 rounded-DEFAULT border border-transparent bg-transparent py-sm text-sm font-medium text-primary transition-colors hover:bg-primary-container/10"
         >
           <UserPlus size={18} />
           Register without Webex
