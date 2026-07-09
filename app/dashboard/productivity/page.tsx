@@ -5,6 +5,16 @@ import { useRouter } from 'next/navigation'
 import { ArrowDownUp, BarChart3, CalendarDays, Clock3, Loader2, RefreshCw, ShieldAlert, Table2, X } from 'lucide-react'
 import { useAuthStore } from '@/lib/authStore'
 import { supabase } from '@/lib/supabase'
+import {
+  TPH_STATUS_DISPLAY_COLUMNS,
+  TphDataSource,
+  getStatusFilteredCounts,
+  getTotalTicketCount,
+  getTphDataSourceForShiftDate,
+  normalizeNameForMatch,
+  parseHourlyTickets,
+  parseSummaryTickets,
+} from '@/lib/tphProductivity'
 
 type ProductivityView = 'status' | 'hour'
 
@@ -21,6 +31,18 @@ type UserNameRow = {
   name: string | null
 }
 
+type TeamAgentRow = {
+  name: string
+}
+
+type TphSummaryRow = {
+  shift_date: string
+  agent: string
+  tickets: string | null
+  hourly_tickets: string | null
+  created_at: string
+}
+
 type AgentProductivity = {
   email: string
   name: string
@@ -31,6 +53,7 @@ type AgentProductivity = {
   latestTicketTime: string | null
   shiftDuration: string
   shiftDurationMs: number
+  source: TphDataSource
 }
 
 type SortedAgentSummary = {
@@ -44,7 +67,7 @@ type SortedAgentSummary = {
 }
 
 const ALLOWED_ROLES = ['Admin', 'Supervisor', 'Operations Manager', 'Team Leader']
-const STATUS_COLUMNS = ['Open', 'Pending', 'Solved', 'On-Hold']
+const STATUS_COLUMNS = [...TPH_STATUS_DISPLAY_COLUMNS]
 const STATUS_FILTERS = ['All', ...STATUS_COLUMNS]
 
 const getPhilippineDate = (date: Date) => {
@@ -149,7 +172,8 @@ export default function ProductivityPage() {
   const router = useRouter()
   const { user } = useAuthStore()
   const [tickets, setTickets] = useState<TphTicket[]>([])
-  const [userNames, setUserNames] = useState<Record<string, string>>({})
+  const [productivityRows, setProductivityRows] = useState<AgentProductivity[]>([])
+  const [dataSource, setDataSource] = useState<TphDataSource>('tph')
   const [selectedShiftDate, setSelectedShiftDate] = useState(() => getDateKey(getShiftDate(new Date())))
   const [selectedStatus, setSelectedStatus] = useState('All')
   const [view, setView] = useState<ProductivityView>('status')
@@ -169,6 +193,45 @@ export default function ProductivityPage() {
     }
   }, [isAllowed, router, user?.role])
 
+  const getVisibleRowsForRole = useCallback(async (
+    rows: AgentProductivity[],
+    rowNames: Record<string, string>
+  ) => {
+    if (user?.role !== 'Team Leader') return rows
+
+    const { data: teamAgents, error: teamError } = await supabase
+      .from('agents')
+      .select('name')
+      .eq('team_leader', user.name || '')
+
+    if (teamError) throw teamError
+
+    const teamNames = new Set(
+      ((teamAgents || []) as TeamAgentRow[]).map((agent) => normalizeNameForMatch(agent.name))
+    )
+
+    return rows.filter((row) => {
+      const rowName = rowNames[row.email] || row.name
+      return teamNames.has(normalizeNameForMatch(rowName)) || teamNames.has(normalizeNameForMatch(row.email))
+    })
+  }, [user?.name, user?.role])
+
+  const getNamesByEmail = useCallback(async (emails: string[]) => {
+    if (emails.length === 0) return {}
+
+    const { data: usersData, error: usersError } = await supabase
+      .from('users')
+      .select('email, name')
+      .in('email', emails)
+
+    if (usersError) throw usersError
+
+    return ((usersData || []) as UserNameRow[]).reduce<Record<string, string>>((names, row) => {
+      names[row.email] = row.name || getEmailFallbackName(row.email)
+      return names
+    }, {})
+  }, [])
+
   const loadProductivity = useCallback(async (showFullLoader = false) => {
     if (!isAllowed) {
       setIsLoading(false)
@@ -185,6 +248,45 @@ export default function ProductivityPage() {
 
       setError('')
 
+      const nextDataSource = getTphDataSourceForShiftDate(selectedShiftDate, currentShiftDate)
+      setDataSource(nextDataSource)
+
+      if (nextDataSource === 'tph_summary') {
+        const { data: summaryData, error: summaryError } = await supabase
+          .from('tph_summary')
+          .select('shift_date, agent, tickets, hourly_tickets, created_at')
+          .eq('shift_date', selectedShiftDate)
+          .order('agent', { ascending: true })
+
+        if (summaryError) throw summaryError
+
+        const summaryRows = (summaryData || []) as TphSummaryRow[]
+        const agentKeys = Array.from(new Set(summaryRows.map((row) => row.agent).filter(Boolean)))
+        const namesByEmail = await getNamesByEmail(agentKeys)
+
+        const nextRows = summaryRows.map<AgentProductivity>((row) => {
+          const allStatusCounts = parseSummaryTickets(row.tickets)
+          const statusCounts = getStatusFilteredCounts(allStatusCounts, selectedStatus)
+
+          return {
+            email: row.agent,
+            name: namesByEmail[row.agent] || getEmailFallbackName(row.agent),
+            total: getTotalTicketCount(statusCounts),
+            statusCounts,
+            hourlyCounts: parseHourlyTickets(row.hourly_tickets),
+            firstTicketTime: null,
+            latestTicketTime: null,
+            shiftDuration: '-',
+            shiftDurationMs: 0,
+            source: 'tph_summary',
+          }
+        }).filter((row) => selectedStatus === 'All' || row.total > 0)
+
+        setTickets([])
+        setProductivityRows(await getVisibleRowsForRole(nextRows, namesByEmail))
+        return
+      }
+
       let tphQuery = supabase
         .from('tph')
         .select('ticket_num, agent, status, shift_date, created_at')
@@ -200,37 +302,74 @@ export default function ProductivityPage() {
       if (tphError) throw tphError
 
       const nextTickets = (tphData || []) as TphTicket[]
-      setTickets(nextTickets)
-
       const emails = Array.from(
         new Set(nextTickets.map((ticket) => ticket.agent).filter((email): email is string => !!email))
       )
+      const namesByEmail = await getNamesByEmail(emails)
+      const rowsByEmail = new Map<string, AgentProductivity>()
 
-      if (emails.length === 0) {
-        setUserNames({})
-        return
-      }
+      nextTickets.forEach((ticket) => {
+        if (!ticket.agent) return
 
-      const { data: usersData, error: usersError } = await supabase
-        .from('users')
-        .select('email, name')
-        .in('email', emails)
+        const existingRow = rowsByEmail.get(ticket.agent)
+        const row = existingRow || {
+          email: ticket.agent,
+          name: namesByEmail[ticket.agent] || getEmailFallbackName(ticket.agent),
+          total: 0,
+          statusCounts: {},
+          hourlyCounts: {},
+          firstTicketTime: null,
+          latestTicketTime: null,
+          shiftDuration: '0h 0m',
+          shiftDurationMs: 0,
+          source: 'tph' as TphDataSource,
+        }
 
-      if (usersError) throw usersError
+        const status = ticket.status || 'No Status'
+        const hourKey = getHourKeyFromTimestamp(ticket.created_at)
+        const createdAtTime = Date.parse(ticket.created_at)
+        const firstTime = row.firstTicketTime ? Date.parse(row.firstTicketTime) : createdAtTime
+        const latestTime = row.latestTicketTime ? Date.parse(row.latestTicketTime) : createdAtTime
 
-      const nextUserNames = ((usersData || []) as UserNameRow[]).reduce<Record<string, string>>((names, row) => {
-        names[row.email] = row.name || getEmailFallbackName(row.email)
-        return names
-      }, {})
+        row.total += 1
+        row.statusCounts[status] = (row.statusCounts[status] || 0) + 1
+        row.hourlyCounts[hourKey] = (row.hourlyCounts[hourKey] || 0) + 1
 
-      setUserNames(nextUserNames)
+        if (!row.firstTicketTime || createdAtTime < firstTime) {
+          row.firstTicketTime = ticket.created_at
+        }
+
+        if (!row.latestTicketTime || createdAtTime > latestTime) {
+          row.latestTicketTime = ticket.created_at
+        }
+
+        rowsByEmail.set(ticket.agent, row)
+      })
+
+      const nextRows = Array.from(rowsByEmail.values()).map((row) => {
+        const firstTime = row.firstTicketTime ? Date.parse(row.firstTicketTime) : 0
+        const latestTime = row.latestTicketTime ? Date.parse(row.latestTicketTime) : 0
+        const shiftDurationMs = Math.max(latestTime - firstTime, 0)
+
+        return {
+          ...row,
+          shiftDurationMs,
+          shiftDuration: formatDuration(shiftDurationMs),
+        }
+      })
+
+      const visibleRows = await getVisibleRowsForRole(nextRows, namesByEmail)
+      const visibleEmails = new Set(visibleRows.map((row) => row.email))
+
+      setTickets(nextTickets.filter((ticket) => ticket.agent && visibleEmails.has(ticket.agent)))
+      setProductivityRows(visibleRows)
     } catch (err: any) {
       setError(err.message || 'Failed to load productivity data')
     } finally {
       setIsLoading(false)
       setIsRefreshing(false)
     }
-  }, [isAllowed, selectedShiftDate, selectedStatus])
+  }, [currentShiftDate, getNamesByEmail, getVisibleRowsForRole, isAllowed, selectedShiftDate, selectedStatus])
 
   useEffect(() => {
     loadProductivity(true)
@@ -271,49 +410,9 @@ export default function ProductivityPage() {
     }
   }, [selectedShiftDate, selectedStatus])
 
-  const productivityRows = useMemo(() => {
-    const rowsByEmail = new Map<string, AgentProductivity>()
+  const displayedProductivityRows = useMemo(() => {
     const sortedSummaryByEmail = new Map(sortedAgentSummaries.map((summary) => [summary.email, summary]))
-
-    tickets.forEach((ticket) => {
-      if (!ticket.agent) return
-
-      const existingRow = rowsByEmail.get(ticket.agent)
-      const sortedSummary = sortedSummaryByEmail.get(ticket.agent)
-      const row = existingRow || {
-        email: ticket.agent,
-        name: sortedSummary?.name || userNames[ticket.agent] || getEmailFallbackName(ticket.agent),
-        total: 0,
-        statusCounts: {},
-        hourlyCounts: {},
-        firstTicketTime: null,
-        latestTicketTime: null,
-        shiftDuration: '0h 0m',
-        shiftDurationMs: 0,
-      }
-
-      const status = ticket.status || 'No Status'
-      const hourKey = getHourKeyFromTimestamp(ticket.created_at)
-      const createdAtTime = Date.parse(ticket.created_at)
-      const firstTime = row.firstTicketTime ? Date.parse(row.firstTicketTime) : createdAtTime
-      const latestTime = row.latestTicketTime ? Date.parse(row.latestTicketTime) : createdAtTime
-
-      row.total += 1
-      row.statusCounts[status] = (row.statusCounts[status] || 0) + 1
-      row.hourlyCounts[hourKey] = (row.hourlyCounts[hourKey] || 0) + 1
-
-      if (!row.firstTicketTime || createdAtTime < firstTime) {
-        row.firstTicketTime = ticket.created_at
-      }
-
-      if (!row.latestTicketTime || createdAtTime > latestTime) {
-        row.latestTicketTime = ticket.created_at
-      }
-
-      rowsByEmail.set(ticket.agent, row)
-    })
-
-    const rows = Array.from(rowsByEmail.values()).map((row) => {
+    const rows = productivityRows.map((row) => {
       const sortedSummary = sortedSummaryByEmail.get(row.email)
 
       if (sortedSummary) {
@@ -327,15 +426,7 @@ export default function ProductivityPage() {
         }
       }
 
-      const firstTime = row.firstTicketTime ? Date.parse(row.firstTicketTime) : 0
-      const latestTime = row.latestTicketTime ? Date.parse(row.latestTicketTime) : 0
-      const shiftDurationMs = Math.max(latestTime - firstTime, 0)
-
-      return {
-        ...row,
-        shiftDurationMs,
-        shiftDuration: formatDuration(shiftDurationMs),
-      }
+      return row
     })
 
     if (sortedAgentSummaries.length > 0) {
@@ -351,10 +442,10 @@ export default function ProductivityPage() {
     }
 
     return rows.sort((first, second) => first.name.localeCompare(second.name))
-  }, [sortedAgentSummaries, tickets, userNames])
+  }, [productivityRows, sortedAgentSummaries])
 
   const totals = useMemo(() => {
-    return productivityRows.reduce(
+    return displayedProductivityRows.reduce(
       (summary, row) => {
         summary.tickets += row.total
         STATUS_COLUMNS.forEach((status) => {
@@ -371,7 +462,7 @@ export default function ProductivityPage() {
         hourlyCounts: {} as Record<string, number>,
       }
     )
-  }, [productivityRows])
+  }, [displayedProductivityRows])
 
   const selectedAgentTickets = useMemo(() => {
     if (!selectedAgentEmail) return []
@@ -389,7 +480,8 @@ export default function ProductivityPage() {
     )
   }
 
-  const selectedAgent = productivityRows.find((row) => row.email === selectedAgentEmail)
+  const selectedAgent = displayedProductivityRows.find((row) => row.email === selectedAgentEmail)
+  const sourceLabel = dataSource === 'tph' ? 'raw TPH rows' : 'TPH summary rows'
 
   if (isLoading) {
     return (
@@ -414,8 +506,9 @@ export default function ProductivityPage() {
             Productivity
           </h1>
           <p className="mt-2 max-w-3xl text-on-surface-variant">
-            Ticket counts from the TPH table for {formatDateKey(selectedShiftDate)}. Current shift date is {formatDateKey(currentShiftDate)}.
+            Ticket counts from {sourceLabel} for {formatDateKey(selectedShiftDate)}. Current shift date is {formatDateKey(currentShiftDate)}.
             {sortedAgentSummaries.length > 0 && ' Sorted by lowest ticket count, then longest duration.'}
+            {dataSource === 'tph_summary' && selectedStatus !== 'All' && view === 'hour' && ' Hourly summary rows are all-status totals.'}
           </p>
           {error && (
             <p className="mt-2 text-sm font-medium text-error">{error}</p>
@@ -503,7 +596,7 @@ export default function ProductivityPage() {
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <div className="rounded-lg border border-outline-variant/60 bg-surface/90 p-4">
           <p className="text-label-md font-semibold uppercase text-on-surface-variant">Agents</p>
-          <p className="mt-2 font-hanken text-headline-md font-bold text-on-surface">{productivityRows.length}</p>
+          <p className="mt-2 font-hanken text-headline-md font-bold text-on-surface">{displayedProductivityRows.length}</p>
         </div>
         <div className="rounded-lg border border-outline-variant/60 bg-surface/90 p-4">
           <p className="text-label-md font-semibold uppercase text-on-surface-variant">Tickets</p>
@@ -537,7 +630,7 @@ export default function ProductivityPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-outline-variant/50">
-                {productivityRows.map((row) => (
+                {displayedProductivityRows.map((row) => (
                   <tr key={row.email} className="cursor-pointer hover:bg-surface-container/60 transition" onClick={() => setSelectedAgentEmail(row.email)}>
                     <td className="min-w-64 px-4 py-3">
                       <p className="font-semibold text-on-surface">{row.name}</p>
@@ -554,7 +647,7 @@ export default function ProductivityPage() {
                     <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">{row.shiftDuration}</td>
                   </tr>
                 ))}
-                {productivityRows.length > 0 && (
+                {displayedProductivityRows.length > 0 && (
                   <tr className="bg-surface-container/70">
                     <td className="px-4 py-3 font-bold text-on-surface">Total</td>
                     {STATUS_COLUMNS.map((status) => (
@@ -587,7 +680,7 @@ export default function ProductivityPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-outline-variant/50">
-                {productivityRows.map((row) => (
+                {displayedProductivityRows.map((row) => (
                   <tr key={row.email} className="cursor-pointer hover:bg-surface-container/60 transition" onClick={() => setSelectedAgentEmail(row.email)}>
                     <td className="sticky left-0 z-10 min-w-64 bg-surface px-4 py-3">
                       <p className="font-semibold text-on-surface">{row.name}</p>
@@ -604,7 +697,7 @@ export default function ProductivityPage() {
                     <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">{row.shiftDuration}</td>
                   </tr>
                 ))}
-                {productivityRows.length > 0 && (
+                {displayedProductivityRows.length > 0 && (
                   <tr className="bg-surface-container/70">
                     <td className="sticky left-0 z-10 bg-surface-container px-4 py-3 font-bold text-on-surface">Total</td>
                     {hourSlots.map((hour) => (
@@ -623,9 +716,9 @@ export default function ProductivityPage() {
           )}
         </div>
 
-        {productivityRows.length === 0 && (
+        {displayedProductivityRows.length === 0 && (
           <div className="flex min-h-48 items-center justify-center border-t border-outline-variant/60 p-6 text-center text-sm text-on-surface-variant">
-            No TPH tickets found for this shift date.
+            No productivity data found for this shift date.
           </div>
         )}
       </section>
@@ -649,23 +742,42 @@ export default function ProductivityPage() {
             </div>
 
             <div className="overflow-y-auto" style={{ maxHeight: 'calc(90vh - 120px)' }}>
-              <table className="min-w-full divide-y divide-outline-variant/60">
-                <thead className="bg-surface-container/60 sticky top-0">
-                  <tr>
-                    <th className="px-3 py-2 text-left text-xs font-bold uppercase text-on-surface-variant">Ticket</th>
-                    <th className="px-3 py-2 text-left text-xs font-bold uppercase text-on-surface-variant">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-outline-variant/50">
-                  {selectedAgentTickets.map((ticket, index) => (
-                    <tr key={`${ticket.ticket_num}-${index}`} className="hover:bg-surface-container/40">
-                      <td className="px-3 py-2 text-xs font-semibold text-on-surface">{ticket.ticket_num}</td>
-                      <td className="px-3 py-2 text-xs font-semibold text-on-surface">{ticket.status || 'No Status'}</td>
+              {selectedAgent.source === 'tph' ? (
+                <table className="min-w-full divide-y divide-outline-variant/60">
+                  <thead className="bg-surface-container/60 sticky top-0">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-xs font-bold uppercase text-on-surface-variant">Ticket</th>
+                      <th className="px-3 py-2 text-left text-xs font-bold uppercase text-on-surface-variant">Status</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-              {selectedAgentTickets.length === 0 && (
+                  </thead>
+                  <tbody className="divide-y divide-outline-variant/50">
+                    {selectedAgentTickets.map((ticket, index) => (
+                      <tr key={`${ticket.ticket_num}-${index}`} className="hover:bg-surface-container/40">
+                        <td className="px-3 py-2 text-xs font-semibold text-on-surface">{ticket.ticket_num}</td>
+                        <td className="px-3 py-2 text-xs font-semibold text-on-surface">{ticket.status || 'No Status'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <table className="min-w-full divide-y divide-outline-variant/60">
+                  <thead className="bg-surface-container/60 sticky top-0">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-xs font-bold uppercase text-on-surface-variant">Status</th>
+                      <th className="px-3 py-2 text-right text-xs font-bold uppercase text-on-surface-variant">Tickets</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-outline-variant/50">
+                    {STATUS_COLUMNS.map((status) => (
+                      <tr key={status} className="hover:bg-surface-container/40">
+                        <td className="px-3 py-2 text-xs font-semibold text-on-surface">{status}</td>
+                        <td className="px-3 py-2 text-right text-xs font-semibold text-on-surface">{selectedAgent.statusCounts[status] || 0}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {selectedAgent.source === 'tph' && selectedAgentTickets.length === 0 && (
                 <div className="flex items-center justify-center border-t border-outline-variant/60 p-4 text-xs text-on-surface-variant">
                   No tickets found for this agent.
                 </div>
@@ -673,7 +785,7 @@ export default function ProductivityPage() {
             </div>
 
             <div className="border-t border-outline-variant/60 bg-surface-container/40 px-6 py-3 text-right text-xs font-semibold text-on-surface">
-              Total Tickets: {selectedAgentTickets.length}
+              Total Tickets: {selectedAgent.total}
             </div>
           </div>
         </div>

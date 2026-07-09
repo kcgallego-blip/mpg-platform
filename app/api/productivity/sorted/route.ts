@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthenticatedDbUser } from '@/lib/sessionAuth'
 import { supabase } from '@/lib/supabase'
+import {
+  getStatusFilteredCounts,
+  getTotalTicketCount,
+  getTphDataSourceForShiftDate,
+  normalizeNameForMatch,
+  parseSummaryTickets,
+} from '@/lib/tphProductivity'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,6 +21,18 @@ type TphRow = {
 type UserNameRow = {
   email: string
   name: string | null
+}
+
+type TeamAgentRow = {
+  name: string
+}
+
+type TphSummaryRow = {
+  shift_date: string
+  agent: string
+  tickets: string | null
+  hourly_tickets: string | null
+  created_at: string
 }
 
 type AgentSummary = {
@@ -46,6 +65,7 @@ const getAuthenticatedUser = async (request: NextRequest) => {
 
   return {
     email: dbUser.email,
+    name: dbUser.name || '',
     role: dbUser.role,
   }
 }
@@ -57,6 +77,48 @@ const formatDuration = (durationMs: number) => {
 
   return `${hours}h ${minutes}m`
 }
+
+const getPhilippineDate = (date: Date) => {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    second: 'numeric',
+    hour12: false,
+    hourCycle: 'h23',
+  }).formatToParts(date)
+
+  const getPart = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((part) => part.type === type)?.value || 0)
+
+  return new Date(
+    getPart('year'),
+    getPart('month') - 1,
+    getPart('day'),
+    getPart('hour'),
+    getPart('minute'),
+    getPart('second')
+  )
+}
+
+const getShiftDate = (date: Date) => {
+  const phDate = getPhilippineDate(date)
+  const shiftDate = new Date(phDate)
+
+  if (phDate.getHours() < 18) {
+    shiftDate.setDate(shiftDate.getDate() - 1)
+  }
+
+  return shiftDate
+}
+
+const getDateKey = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
+    date.getDate()
+  ).padStart(2, '0')}`
 
 export async function GET(request: NextRequest) {
   try {
@@ -76,6 +138,97 @@ export async function GET(request: NextRequest) {
 
     if (!DATE_KEY_PATTERN.test(shiftDate)) {
       return NextResponse.json({ error: 'Invalid shift date' }, { status: 400 })
+    }
+
+    const currentShiftDate = getDateKey(getShiftDate(new Date()))
+    const dataSource = getTphDataSourceForShiftDate(shiftDate, currentShiftDate)
+
+    if (dataSource === 'tph_summary') {
+      const { data: summaryData, error: summaryError } = await supabase
+        .from('tph_summary')
+        .select('shift_date, agent, tickets, hourly_tickets, created_at')
+        .eq('shift_date', shiftDate)
+        .order('agent', { ascending: true })
+
+      if (summaryError) throw summaryError
+
+      const summariesByEmail = new Map<string, AgentSummary>()
+
+      ;((summaryData || []) as TphSummaryRow[]).forEach((row) => {
+        const statusCounts = getStatusFilteredCounts(parseSummaryTickets(row.tickets), status)
+
+        const totalTickets = getTotalTicketCount(statusCounts)
+        if (status !== 'All' && totalTickets === 0) return
+
+        summariesByEmail.set(row.agent, {
+          email: row.agent,
+          name: getEmailFallbackName(row.agent),
+          totalTickets,
+          firstTicketTime: null,
+          latestTicketTime: null,
+          shiftDurationMs: 0,
+        })
+      })
+
+      const emails = Array.from(summariesByEmail.keys())
+      const namesByEmail = new Map<string, string>()
+
+      if (emails.length > 0) {
+        const { data: users, error: usersError } = await supabase
+          .from('users')
+          .select('email, name')
+          .in('email', emails)
+
+        if (usersError) throw usersError
+
+        ;((users || []) as UserNameRow[]).forEach((row) => {
+          const name = row.name || getEmailFallbackName(row.email)
+          namesByEmail.set(row.email, name)
+
+          const summary = summariesByEmail.get(row.email)
+          if (summary) {
+            summary.name = name
+          }
+        })
+      }
+
+      let summaries = Array.from(summariesByEmail.values())
+
+      if (user.role === 'Team Leader') {
+        const { data: teamAgents, error: teamError } = await supabase
+          .from('agents')
+          .select('name')
+          .eq('team_leader', user.name)
+
+        if (teamError) throw teamError
+
+        const teamNames = new Set(
+          ((teamAgents || []) as TeamAgentRow[]).map((agent) => normalizeNameForMatch(agent.name))
+        )
+
+        summaries = summaries.filter((summary) =>
+          teamNames.has(normalizeNameForMatch(namesByEmail.get(summary.email) || summary.name)) ||
+          teamNames.has(normalizeNameForMatch(summary.email))
+        )
+      }
+
+      summaries.sort((first, second) => {
+        if (first.totalTickets !== second.totalTickets) {
+          return first.totalTickets - second.totalTickets
+        }
+
+        return first.name.localeCompare(second.name)
+      })
+
+      return NextResponse.json({
+        shiftDate,
+        status,
+        source: dataSource,
+        agents: summaries.map((summary) => ({
+          ...summary,
+          shiftDuration: formatDuration(summary.shiftDurationMs),
+        })),
+      })
     }
 
     // Optimized for the composite index on (shift_date, agent, ticket_num):
@@ -155,7 +308,27 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    const summaries = Array.from(summariesByEmail.values()).map((summary) => {
+    let summariesForRole = Array.from(summariesByEmail.values())
+
+    if (user.role === 'Team Leader') {
+      const { data: teamAgents, error: teamError } = await supabase
+        .from('agents')
+        .select('name')
+        .eq('team_leader', user.name)
+
+      if (teamError) throw teamError
+
+      const teamNames = new Set(
+        ((teamAgents || []) as TeamAgentRow[]).map((agent) => normalizeNameForMatch(agent.name))
+      )
+
+      summariesForRole = summariesForRole.filter((summary) =>
+        teamNames.has(normalizeNameForMatch(summary.name)) ||
+        teamNames.has(normalizeNameForMatch(summary.email))
+      )
+    }
+
+    const summaries = summariesForRole.map((summary) => {
       const firstTime = summary.firstTicketTime ? Date.parse(summary.firstTicketTime) : 0
       const latestTime = summary.latestTicketTime ? Date.parse(summary.latestTicketTime) : 0
       const shiftDurationMs = Math.max(latestTime - firstTime, 0)
@@ -182,6 +355,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       shiftDate,
       status,
+      source: dataSource,
       agents: summaries,
     })
   } catch (error: any) {

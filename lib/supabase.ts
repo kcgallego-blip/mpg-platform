@@ -46,27 +46,37 @@ export type Database = {
       }
       agents: {
         Row: {
-          id: string
           name: string
-          team_leader: string
+          team_leader: string | null
           setting: string | null
-          created_at: string
-          updated_at: string
+          role: string | null
+          off_1: string | null
+          off_2: string | null
+          start_shift: string | null
+          end_shift: string | null
+          comments: string | null
         }
         Insert: {
-          id?: string
           name: string
-          team_leader: string
+          team_leader?: string | null
           setting?: string | null
-          created_at?: string
-          updated_at?: string
+          role?: string | null
+          off_1?: string | null
+          off_2?: string | null
+          start_shift?: string | null
+          end_shift?: string | null
+          comments?: string | null
         }
         Update: {
-          id?: string
           name?: string
-          team_leader?: string
+          team_leader?: string | null
           setting?: string | null
-          updated_at?: string
+          role?: string | null
+          off_1?: string | null
+          off_2?: string | null
+          start_shift?: string | null
+          end_shift?: string | null
+          comments?: string | null
         }
       }
       tickets: {
@@ -218,6 +228,29 @@ export type Database = {
           agent?: string | null
           status?: string | null
           shift_date?: string | null
+        }
+      }
+      tph_summary: {
+        Row: {
+          shift_date: string
+          agent: string
+          tickets: string | null
+          hourly_tickets: string | null
+          created_at: string
+        }
+        Insert: {
+          shift_date: string
+          agent: string
+          tickets?: string | null
+          hourly_tickets?: string | null
+          created_at?: string
+        }
+        Update: {
+          shift_date?: string
+          agent?: string
+          tickets?: string | null
+          hourly_tickets?: string | null
+          created_at?: string
         }
       }
     }

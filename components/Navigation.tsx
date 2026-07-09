@@ -27,6 +27,7 @@ const allNavItems: NavItem[] = [
     children: [
       { href: '/dashboard/utilities/ledger', icon: FileText, label: 'Ledger' },
       { href: '/dashboard/utilities/accounts', icon: Users, label: 'Accounts' },
+      { href: '/dashboard/utilities/agents', icon: Users, label: 'Agents' },
     ],
   },
 ]
