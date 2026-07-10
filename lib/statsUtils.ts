@@ -29,6 +29,29 @@ export function getStatsWeekRange(date = new Date()): number {
   return date.getDay() + 1
 }
 
+export function getStatsMonthName(month: number, referenceDate = new Date()): string {
+  return new Intl.DateTimeFormat('en-PH', {
+    month: 'long',
+    year: 'numeric',
+  }).format(new Date(referenceDate.getFullYear(), month - 1, 1))
+}
+
+export function getStatsMonthOptions(): number[] {
+  return [5, 6, 7]
+}
+
+export function getStatsPeriodLabel(
+  periodType: 'weekly' | 'monthly',
+  periodValue: number,
+  referenceDate = new Date()
+): string {
+  if (periodType === 'monthly') {
+    return getStatsMonthName(periodValue, referenceDate)
+  }
+
+  return getStatsWeekRangeLabel(periodValue, getStatsWeekRange(referenceDate), referenceDate)
+}
+
 export function getStatsWeekRangeDates(
   week: number,
   range: number,

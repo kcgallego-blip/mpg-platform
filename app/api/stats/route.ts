@@ -11,6 +11,16 @@ const parseWeek = (value: string | null) => {
   return Number.isInteger(week) && week > 0 ? week : undefined
 }
 
+const parseMonth = (value: string | null) => {
+  if (value === null) return null
+  const month = Number(value)
+  return Number.isInteger(month) && month >= 1 && month <= 12 ? month : undefined
+}
+
+const parsePeriodType = (value: string | null) => {
+  return value === 'monthly' ? 'monthly' : 'weekly'
+}
+
 const normalizeNameForMatch = (value: string | null | undefined) =>
   (value || '')
     .toLowerCase()
@@ -79,14 +89,24 @@ export async function GET(request: NextRequest) {
     const supervisorFilter = searchParams.get('supervisor')
     const sortBy = searchParams.get('sortBy') || 'name'
     const sortOrder = searchParams.get('sortOrder') || 'asc'
-    const weekParam = searchParams.get('week')
-    const parsedWeek = parseWeek(weekParam)
+    const periodTypeParam = searchParams.get('periodType')
+    const periodType = parsePeriodType(periodTypeParam)
+    const periodValueParam = searchParams.get('period') ?? searchParams.get('week') ?? searchParams.get('month')
+    const parsedWeek = parseWeek(periodValueParam)
+    const parsedMonth = parseMonth(periodValueParam)
+    const isMonthly = periodType === 'monthly'
 
-    if (weekParam !== null && parsedWeek === undefined) {
+    if (periodValueParam !== null && !isMonthly && parsedWeek === undefined) {
       return NextResponse.json({ error: 'Week must be a positive integer' }, { status: 400 })
     }
 
+    if (periodValueParam !== null && isMonthly && parsedMonth === undefined) {
+      return NextResponse.json({ error: 'Month must be between 1 and 12' }, { status: 400 })
+    }
+
     const selectedWeek = parsedWeek ?? getStatsWeekNumber()
+    const selectedMonth = parsedMonth ?? new Date().getMonth() + 1
+    const selectedPeriodValue = isMonthly ? selectedMonth : selectedWeek
 
     // Validate sort parameters
     const validSortFields = [
@@ -120,9 +140,14 @@ export async function GET(request: NextRequest) {
 
     // Build the base query
     let query = supabase
-      .from('stats')
+      .from(isMonthly ? 'stats_month' : 'stats')
       .select('*')
-      .eq('week', selectedWeek)
+
+    if (isMonthly) {
+      query = query.eq('month', String(selectedPeriodValue))
+    } else {
+      query = query.eq('week', selectedWeek)
+    }
 
     // Apply role-based filtering
     if (isAgent) {
@@ -160,11 +185,15 @@ export async function GET(request: NextRequest) {
           })
       : rawStats || []
 
-    const selectedRange = statsForWeek.length > 0
-      ? Math.max(...statsForWeek.map(stat => stat.range))
-      : getStatsWeekRange()
+    const selectedRange = isMonthly
+      ? 1
+      : statsForWeek.length > 0
+        ? Math.max(...statsForWeek.map(stat => stat.range))
+        : getStatsWeekRange()
 
-    const stats = statsForWeek.filter(stat => stat.range === selectedRange)
+    const stats = isMonthly
+      ? statsForWeek
+      : statsForWeek.filter(stat => stat.range === selectedRange)
 
     // If team leader/supervisor, also return list of unique supervisors for filtering
     let supervisors: string[] = []
@@ -181,6 +210,8 @@ export async function GET(request: NextRequest) {
       userRole,
       userName,
       range: selectedRange,
+      periodType,
+      periodValue: selectedPeriodValue,
     })
   } catch (error) {
     console.error('Stats API error:', error)

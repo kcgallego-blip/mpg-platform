@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAuthStore } from '@/lib/authStore'
 import {
   formatStatsDate,
+  getStatsMonthOptions,
+  getStatsPeriodLabel,
   getStatsRangeFromDate,
   getStatsWeekDateOptions,
   getStatsWeekNumber,
@@ -33,6 +35,8 @@ export default function StatsUploadPage() {
     message: string
   } | null>(null)
   const [selectedWeek, setSelectedWeek] = useState(() => getStatsWeekNumber())
+  const [selectedMonth, setSelectedMonth] = useState(() => new Date().getMonth() + 1)
+  const [periodType, setPeriodType] = useState<'weekly' | 'monthly'>('weekly')
   const [selectedEndDate, setSelectedEndDate] = useState(() =>
     formatStatsDate(getStatsWeekRangeDates(getStatsWeekNumber(), getStatsWeekRange()).endDate)
   )
@@ -41,10 +45,11 @@ export default function StatsUploadPage() {
     [selectedWeek, selectedEndDate]
   )
   const selectedDateRange = useMemo(
-    () => getStatsWeekRangeLabel(selectedWeek, selectedRange),
-    [selectedWeek, selectedRange]
+    () => getStatsPeriodLabel(periodType, periodType === 'monthly' ? selectedMonth : selectedWeek),
+    [periodType, selectedMonth, selectedWeek]
   )
   const weekDateOptions = useMemo(() => getStatsWeekDateOptions(selectedWeek), [selectedWeek])
+  const periodOptions = useMemo(() => getStatsMonthOptions(), [])
   const weekStart = useMemo(() => getStatsWeekRangeDates(selectedWeek, 1).startDate, [selectedWeek])
   const weekEnd = useMemo(() => getStatsWeekRangeDates(selectedWeek, 7).endDate, [selectedWeek])
 
@@ -118,12 +123,17 @@ export default function StatsUploadPage() {
       return
     }
 
-    if (!Number.isInteger(selectedWeek) || selectedWeek < 1) {
+    if (periodType === 'weekly' && (!Number.isInteger(selectedWeek) || selectedWeek < 1)) {
       setError('Please select a valid stats week')
       return
     }
 
-    if (!Number.isInteger(selectedRange) || selectedRange < 1 || selectedRange > 7) {
+    if (periodType === 'monthly' && (!Number.isInteger(selectedMonth) || selectedMonth < 1 || selectedMonth > 12)) {
+      setError('Please select a valid stats month')
+      return
+    }
+
+    if (periodType === 'weekly' && (!Number.isInteger(selectedRange) || selectedRange < 1 || selectedRange > 7)) {
       setError('Please select a valid stats range end date')
       return
     }
@@ -142,7 +152,9 @@ export default function StatsUploadPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           csvContent,
+          periodType,
           week: selectedWeek,
+          month: selectedMonth,
           range: selectedRange,
         }),
       })
@@ -166,7 +178,7 @@ export default function StatsUploadPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [file, selectedWeek, selectedRange])
+  }, [file, periodType, selectedMonth, selectedWeek, selectedRange])
 
   return (
     <div className="space-y-6 pb-8">
@@ -215,59 +227,96 @@ export default function StatsUploadPage() {
 
       {/* Import Period */}
       <div className="rounded-lg border border-outline-variant/60 bg-surface-dim p-6">
-        <h3 className="mb-4 font-semibold text-on-surface">Import Period</h3>
+        <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <h3 className="font-semibold text-on-surface">Import Period</h3>
+          <div className="inline-flex rounded-full border border-outline-variant bg-surface p-1">
+            <button
+              type="button"
+              onClick={() => setPeriodType('weekly')}
+              className={`rounded-full px-4 py-2 text-sm font-semibold transition ${periodType === 'weekly' ? 'bg-primary-container text-on-primary-container' : 'text-on-surface-variant'}`}
+            >
+              Weekly
+            </button>
+            <button
+              type="button"
+              onClick={() => setPeriodType('monthly')}
+              className={`rounded-full px-4 py-2 text-sm font-semibold transition ${periodType === 'monthly' ? 'bg-primary-container text-on-primary-container' : 'text-on-surface-variant'}`}
+            >
+              Monthly
+            </button>
+          </div>
+        </div>
         <div className="grid gap-4 md:grid-cols-3">
           <div>
-            <label htmlFor="statsWeek" className="mb-2 block text-sm font-medium text-on-surface">
-              Week
+            <label htmlFor="statsPeriod" className="mb-2 block text-sm font-medium text-on-surface">
+              {periodType === 'monthly' ? 'Month' : 'Week'}
             </label>
-            <input
-              id="statsWeek"
-              type="number"
-              min="1"
-              value={selectedWeek}
-              onChange={e => setSelectedWeek(Number(e.target.value))}
-              className="w-full rounded-lg border border-outline bg-surface px-4 py-2.5 text-on-surface outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
-            />
+            {periodType === 'monthly' ? (
+              <select
+                id="statsPeriod"
+                value={selectedMonth}
+                onChange={e => setSelectedMonth(Number(e.target.value))}
+                className="w-full rounded-lg border border-outline bg-surface px-4 py-2.5 text-on-surface outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
+              >
+                {periodOptions.map(month => (
+                  <option key={month} value={month}>
+                    {new Intl.DateTimeFormat('en-PH', { month: 'long' }).format(new Date(new Date().getFullYear(), month - 1, 1))}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                id="statsPeriod"
+                type="number"
+                min="1"
+                value={selectedWeek}
+                onChange={e => setSelectedWeek(Number(e.target.value))}
+                className="w-full rounded-lg border border-outline bg-surface px-4 py-2.5 text-on-surface outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
+              />
+            )}
           </div>
 
-          <div>
-            <label htmlFor="statsRangeEndDate" className="mb-2 block text-sm font-medium text-on-surface">
-              Range End Date
-            </label>
-            <select
-              id="statsRangeEndDate"
-              value={selectedEndDate}
-              onChange={e => setSelectedEndDate(e.target.value)}
-              className="w-full rounded-lg border border-outline bg-surface px-4 py-2.5 text-on-surface outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
-            >
-              {weekDateOptions.map(date => {
-                const parsedDate = new Date(`${date}T00:00:00`)
-                const label = new Intl.DateTimeFormat('en-PH', {
-                  weekday: 'short',
-                  month: 'short',
-                  day: 'numeric',
-                }).format(parsedDate)
-                const isWeekStart = date === formatStatsDate(weekStart)
-                const isWeekEnd = date === formatStatsDate(weekEnd)
-                return (
-                  <option key={date} value={date}>
-                    {label}{isWeekStart ? ' (week start)' : ''}{isWeekEnd ? ' (week end)' : ''}
-                  </option>
-                )
-              })}
-            </select>
-          </div>
+          {periodType === 'weekly' && (
+            <div>
+              <label htmlFor="statsRangeEndDate" className="mb-2 block text-sm font-medium text-on-surface">
+                Range End Date
+              </label>
+              <select
+                id="statsRangeEndDate"
+                value={selectedEndDate}
+                onChange={e => setSelectedEndDate(e.target.value)}
+                className="w-full rounded-lg border border-outline bg-surface px-4 py-2.5 text-on-surface outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
+              >
+                {weekDateOptions.map(date => {
+                  const parsedDate = new Date(`${date}T00:00:00`)
+                  const label = new Intl.DateTimeFormat('en-PH', {
+                    weekday: 'short',
+                    month: 'short',
+                    day: 'numeric',
+                  }).format(parsedDate)
+                  const isWeekStart = date === formatStatsDate(weekStart)
+                  const isWeekEnd = date === formatStatsDate(weekEnd)
+                  return (
+                    <option key={date} value={date}>
+                      {label}{isWeekStart ? ' (week start)' : ''}{isWeekEnd ? ' (week end)' : ''}
+                    </option>
+                  )
+                })}
+              </select>
+            </div>
+          )}
 
           <div>
             <p className="mb-2 block text-sm font-medium text-on-surface">Selected Import Range</p>
             <div className="rounded-lg bg-surface px-4 py-2.5 text-on-surface">
-              Week {selectedWeek} • {selectedDateRange}
+              {periodType === 'monthly' ? `${new Intl.DateTimeFormat('en-PH', { month: 'long', year: 'numeric' }).format(new Date(new Date().getFullYear(), selectedMonth - 1, 1))}` : `Week ${selectedWeek}`} • {selectedDateRange}
             </div>
           </div>
         </div>
         <p className="mt-3 text-sm text-on-surface-variant">
-          Weeks start on Sunday. Importing an existing week overwrites all stats for that week.
+          {periodType === 'monthly'
+            ? 'Monthly imports follow the same CSV format as weekly uploads and overwrite the selected month.'
+            : 'Weeks start on Sunday. Importing an existing week overwrites all stats for that week.'}
         </p>
       </div>
 

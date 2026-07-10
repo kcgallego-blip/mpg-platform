@@ -12,6 +12,8 @@ import {
   Upload,
 } from 'lucide-react'
 import {
+  getStatsMonthOptions,
+  getStatsPeriodLabel,
   getStatsWeekNumber,
   getStatsWeekRange,
   getStatsWeekRangeLabel,
@@ -147,20 +149,26 @@ export default function StatsPage() {
   const [sortConfig, setSortConfig] = useState<SortConfig>({ field: 'name', order: 'asc' })
   const [userRole, setUserRole] = useState<string | null>(null)
   const [selectedWeek, setSelectedWeek] = useState(() => getStatsWeekNumber())
+  const [selectedMonth, setSelectedMonth] = useState(() => new Date().getMonth() + 1)
+  const [periodType, setPeriodType] = useState<'weekly' | 'monthly'>('weekly')
   const [displayedRange, setDisplayedRange] = useState(() => getStatsWeekRange())
 
   const displayedDateRange = useMemo(
-    () => getStatsWeekRangeLabel(selectedWeek, displayedRange),
-    [selectedWeek, displayedRange]
+    () => getStatsPeriodLabel(periodType, periodType === 'monthly' ? selectedMonth : selectedWeek),
+    [periodType, selectedMonth, selectedWeek]
   )
 
-  const weekOptions = useMemo(() => {
+  const periodOptions = useMemo(() => {
+    if (periodType === 'monthly') {
+      return getStatsMonthOptions()
+    }
+
     const currentWeek = getStatsWeekNumber()
     return Array.from(
       { length: Math.min(currentWeek, 12) },
       (_, index) => currentWeek - index
     )
-  }, [])
+  }, [periodType])
 
   const loadStats = useCallback(async () => {
     if (!user?.email) {
@@ -178,7 +186,8 @@ export default function StatsPage() {
         supervisor: selectedSupervisor,
         sortBy: sortConfig.field,
         sortOrder: sortConfig.order,
-        week: String(selectedWeek),
+        periodType,
+        period: String(periodType === 'monthly' ? selectedMonth : selectedWeek),
       })
 
       const response = await fetch(`/api/stats?${queryParams}`)
@@ -196,13 +205,19 @@ export default function StatsPage() {
       setSupervisors(data.supervisors || [])
       setDisplayedRange(data.range || getStatsWeekRange())
       setUserRole(data.userRole)
+      if (data.periodType) {
+        setPeriodType(data.periodType)
+      }
+      if (data.periodValue && data.periodType === 'monthly') {
+        setSelectedMonth(Number(data.periodValue))
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to load stats')
       console.error('Stats error:', err)
     } finally {
       setIsLoading(false)
     }
-  }, [user?.email, searchQuery, selectedSupervisor, sortConfig, selectedWeek, router])
+  }, [user?.email, searchQuery, selectedSupervisor, sortConfig, periodType, selectedMonth, selectedWeek, router])
 
   useEffect(() => {
     loadStats()
@@ -316,6 +331,9 @@ export default function StatsPage() {
   }
 
   const latestAgentStat = stats[0]!
+  const periodLabel = periodType === 'monthly'
+    ? new Intl.DateTimeFormat('en-PH', { month: 'long', year: 'numeric' }).format(new Date(new Date().getFullYear(), selectedMonth - 1, 1))
+    : `Week ${selectedWeek}`
 
   return (
     <div className="space-y-6 pb-8">
@@ -332,18 +350,36 @@ export default function StatsPage() {
               : 'View and manage agent performance metrics. Green chips indicate passing scores.'}
           </p>
         </div>
-        {(userRole?.toLowerCase() === 'team leader' ||
-          userRole?.toLowerCase() === 'supervisor' ||
-          userRole?.toLowerCase() === 'admin' ||
-          userRole?.toLowerCase() === 'manager') && (
-          <button
-            onClick={() => router.push('/dashboard/stats/upload')}
-            className="flex items-center gap-2 rounded-lg bg-primary-container px-6 py-2.5 font-medium text-on-primary-container transition hover:opacity-90 whitespace-nowrap"
-          >
-            <Upload size={18} />
-            Upload Stats
-          </button>
-        )}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="inline-flex rounded-full border border-outline-variant bg-surface p-1">
+            <button
+              type="button"
+              onClick={() => setPeriodType('weekly')}
+              className={`rounded-full px-4 py-2 text-sm font-semibold transition ${periodType === 'weekly' ? 'bg-primary-container text-on-primary-container' : 'text-on-surface-variant'}`}
+            >
+              Weekly
+            </button>
+            <button
+              type="button"
+              onClick={() => setPeriodType('monthly')}
+              className={`rounded-full px-4 py-2 text-sm font-semibold transition ${periodType === 'monthly' ? 'bg-primary-container text-on-primary-container' : 'text-on-surface-variant'}`}
+            >
+              Monthly
+            </button>
+          </div>
+          {(userRole?.toLowerCase() === 'team leader' ||
+            userRole?.toLowerCase() === 'supervisor' ||
+            userRole?.toLowerCase() === 'admin' ||
+            userRole?.toLowerCase() === 'manager') && (
+            <button
+              onClick={() => router.push('/dashboard/stats/upload')}
+              className="flex items-center gap-2 rounded-lg bg-primary-container px-6 py-2.5 font-medium text-on-primary-container transition hover:opacity-90 whitespace-nowrap"
+            >
+              <Upload size={18} />
+              Upload Stats
+            </button>
+          )}
+        </div>
       </div>
 
       {error && (
@@ -407,28 +443,45 @@ export default function StatsPage() {
         <div className="rounded-lg border border-outline-variant/60 bg-surface-dim p-5">
           <div className="grid gap-4 md:grid-cols-2">
             <div>
-              <label htmlFor="statsWeek" className="mb-2 block text-sm font-medium text-on-surface">
-                Week
+              <label htmlFor="statsPeriod" className="mb-2 block text-sm font-medium text-on-surface">
+                {periodType === 'monthly' ? 'Month' : 'Week'}
               </label>
-              <input
-                id="statsWeek"
-                type="number"
-                min="1"
-                value={selectedWeek}
-                onChange={e => setSelectedWeek(Number(e.target.value))}
-                className="w-full rounded-lg border border-outline bg-surface px-4 py-2.5 text-on-surface outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
-              />
+              {periodType === 'monthly' ? (
+                <select
+                  id="statsPeriod"
+                  value={selectedMonth}
+                  onChange={e => setSelectedMonth(Number(e.target.value))}
+                  className="w-full rounded-lg border border-outline bg-surface px-4 py-2.5 text-on-surface outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
+                >
+                  {periodOptions.map(month => (
+                    <option key={month} value={month}>
+                      {new Intl.DateTimeFormat('en-PH', { month: 'long' }).format(new Date(new Date().getFullYear(), month - 1, 1))}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  id="statsPeriod"
+                  type="number"
+                  min="1"
+                  value={selectedWeek}
+                  onChange={e => setSelectedWeek(Number(e.target.value))}
+                  className="w-full rounded-lg border border-outline bg-surface px-4 py-2.5 text-on-surface outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
+                />
+              )}
             </div>
 
             <div>
               <p className="mb-2 block text-sm font-medium text-on-surface">Showing Range</p>
               <div className="rounded-lg bg-surface px-4 py-2.5 text-on-surface">
-                Week {selectedWeek} • {displayedDateRange}
+                {periodType === 'monthly' ? periodLabel : `Week ${selectedWeek}`} • {displayedDateRange}
               </div>
             </div>
           </div>
           <p className="mt-3 text-sm text-on-surface-variant">
-            Weeks start on Sunday. The range shown is based on the latest available stats for the selected week.
+            {periodType === 'monthly'
+              ? 'Monthly imports use the selected month and follow the same CSV format as weekly uploads.'
+              : 'Weeks start on Sunday. The range shown is based on the latest available stats for the selected week.'}
           </p>
         </div>
       )}
@@ -448,22 +501,37 @@ export default function StatsPage() {
               </p>
             </div>
 
-            <div className="w-full md:w-56">
-              <label htmlFor="agentStatsWeek" className="mb-2 block text-xs font-medium uppercase tracking-wide text-on-surface-variant">
-                Week
+            <div className="w-full md:w-64">
+              <label htmlFor="agentStatsPeriod" className="mb-2 block text-xs font-medium uppercase tracking-wide text-on-surface-variant">
+                {periodType === 'monthly' ? 'Month' : 'Week'}
               </label>
-              <select
-                id="agentStatsWeek"
-                value={selectedWeek}
-                onChange={e => setSelectedWeek(Number(e.target.value))}
-                className="w-full rounded-lg border border-outline bg-surface px-3 py-2.5 text-sm font-semibold text-on-surface outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
-              >
-                {weekOptions.map(week => (
-                  <option key={week} value={week}>
-                    Week {week}
-                  </option>
-                ))}
-              </select>
+              {periodType === 'monthly' ? (
+                <select
+                  id="agentStatsPeriod"
+                  value={selectedMonth}
+                  onChange={e => setSelectedMonth(Number(e.target.value))}
+                  className="w-full rounded-lg border border-outline bg-surface px-3 py-2.5 text-sm font-semibold text-on-surface outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
+                >
+                  {periodOptions.map(month => (
+                    <option key={month} value={month}>
+                      {new Intl.DateTimeFormat('en-PH', { month: 'long' }).format(new Date(new Date().getFullYear(), month - 1, 1))}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <select
+                  id="agentStatsPeriod"
+                  value={selectedWeek}
+                  onChange={e => setSelectedWeek(Number(e.target.value))}
+                  className="w-full rounded-lg border border-outline bg-surface px-3 py-2.5 text-sm font-semibold text-on-surface outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
+                >
+                  {periodOptions.map(week => (
+                    <option key={week} value={week}>
+                      Week {week}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
           </div>
         </div>
@@ -474,7 +542,7 @@ export default function StatsPage() {
         stats.length === 0 ? (
           <div className="flex flex-col items-center justify-center rounded-lg border border-outline-variant/60 bg-surface/70 py-16">
             <AlertCircle size={40} className="mb-4 text-on-surface-variant/40" />
-            <p className="text-on-surface-variant">No scorecard available for Week {selectedWeek} ({displayedDateRange}).</p>
+            <p className="text-on-surface-variant">No scorecard available for {periodType === 'monthly' ? 'the selected month' : `Week ${selectedWeek}`} ({displayedDateRange}).</p>
           </div>
         ) : (
           <div className="rounded-2xl border border-outline-variant/60 bg-surface p-5 shadow-sm">
@@ -490,7 +558,9 @@ export default function StatsPage() {
                   {latestAgentStat.supervisor ? `Team Leader: ${latestAgentStat.supervisor}` : 'Performance metrics'}
                 </p>
                 <p className="mt-1 text-sm text-on-surface-variant">
-                  Week {latestAgentStat.week} • {getStatsWeekRangeLabel(latestAgentStat.week, latestAgentStat.range)}
+                  {periodType === 'monthly'
+                    ? `${new Intl.DateTimeFormat('en-PH', { month: 'long', year: 'numeric' }).format(new Date(new Date().getFullYear(), selectedMonth - 1, 1))}`
+                    : `Week ${latestAgentStat.week} • ${getStatsWeekRangeLabel(latestAgentStat.week, latestAgentStat.range)}`}
                 </p>
               </div>
               <div className="rounded-xl bg-surface-container-low p-4">
@@ -623,13 +693,13 @@ export default function StatsPage() {
         <div className="flex flex-col items-center justify-center rounded-lg border border-outline-variant/60 bg-surface/70 py-16">
           <AlertCircle size={40} className="mb-4 text-on-surface-variant/40" />
           <p className="text-on-surface-variant">
-            {searchQuery ? `No agents found matching your search for Week ${selectedWeek} (${displayedDateRange}).` : `No stats available for Week ${selectedWeek} (${displayedDateRange}).`}
+            {searchQuery ? `No agents found matching your search for ${periodType === 'monthly' ? 'the selected month' : `Week ${selectedWeek}`} (${displayedDateRange}).` : `No stats available for ${periodType === 'monthly' ? 'the selected month' : `Week ${selectedWeek}`} (${displayedDateRange}).`}
           </p>
         </div>
       ) : (
         <>
           <div className="mb-3 rounded-lg border border-outline-variant/60 bg-surface-dim p-4 text-sm text-on-surface-variant">
-            Showing Week {selectedWeek} • {displayedDateRange}
+            Showing {periodType === 'monthly' ? 'Month' : 'Week'} {periodType === 'monthly' ? periodLabel : selectedWeek} • {displayedDateRange}
           </div>
           <div className="overflow-x-auto rounded-lg border border-outline-variant/60 bg-surface">
           <table className="w-full border-collapse">

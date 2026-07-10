@@ -223,11 +223,8 @@ export default function AgentDashboardPage() {
             My Tickets
           </p>
           <h1 className="font-hanken text-headline-lg font-bold text-on-surface">
-            Your Assigned Tickets
+            Your Worked-on Tickets
           </h1>
-          <p className="mt-2 max-w-2xl text-on-surface-variant">
-            View your tickets from {sourceLabel} for {formatSelectedDate(selectedShiftDate)}, organized by status.
-          </p>
           {error && (
             <p className="mt-2 text-sm font-medium text-error">{error}</p>
           )}

@@ -7,6 +7,11 @@ const parseWeek = (value: unknown) => {
   return Number.isInteger(week) && week > 0 ? week : null
 }
 
+const parseMonth = (value: unknown) => {
+  const month = typeof value === 'string' || typeof value === 'number' ? Number(value) : NaN
+  return Number.isInteger(month) && month >= 1 && month <= 12 ? month : null
+}
+
 const parseRange = (value: unknown) => {
   const range = typeof value === 'string' || typeof value === 'number' ? Number(value) : NaN
   return Number.isInteger(range) && range >= 1 && range <= 7 ? range : null
@@ -34,7 +39,7 @@ export async function POST(request: NextRequest) {
 
     // Parse request body
     const body = await request.json()
-    const { csvContent, week, range } = body
+    const { csvContent, periodType, week, month, range } = body
 
     if (!csvContent || typeof csvContent !== 'string') {
       return NextResponse.json(
@@ -43,14 +48,20 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const selectedPeriodType = periodType === 'monthly' ? 'monthly' : 'weekly'
     const selectedWeek = parseWeek(week)
+    const selectedMonth = parseMonth(month)
     const selectedRange = parseRange(range)
 
-    if (selectedWeek === null) {
+    if (selectedPeriodType === 'weekly' && selectedWeek === null) {
       return NextResponse.json({ error: 'Week must be a positive integer' }, { status: 400 })
     }
 
-    if (selectedRange === null) {
+    if (selectedPeriodType === 'monthly' && selectedMonth === null) {
+      return NextResponse.json({ error: 'Month must be between 1 and 12' }, { status: 400 })
+    }
+
+    if (selectedPeriodType === 'weekly' && selectedRange === null) {
       return NextResponse.json({ error: 'Range must be an integer from 1 to 7' }, { status: 400 })
     }
 
@@ -104,8 +115,12 @@ export async function POST(request: NextRequest) {
         transactions: r.Transactions ? parseInt(r.Transactions) : null,
         productive_hours: r['Productive Hours'] || null,
         tph: r.TPH ? parseFloat(r.TPH) : null,
-        week: selectedWeek,
-        range: selectedRange,
+        ...(selectedPeriodType === 'monthly'
+          ? { month: String(selectedMonth) }
+          : {
+              week: selectedWeek ?? 1,
+              range: selectedRange ?? 1,
+            }),
       }))
 
     if (dbRecords.length === 0) {
@@ -116,10 +131,12 @@ export async function POST(request: NextRequest) {
     }
 
     // Capture existing rows so a failed import can restore the previous week data.
+    const tableName = selectedPeriodType === 'monthly' ? 'stats_month' : 'stats'
+
     const { data: existingRows, error: fetchExistingError } = await supabase
-      .from('stats')
+      .from(tableName)
       .select('*')
-      .eq('week', selectedWeek)
+      .eq(selectedPeriodType === 'monthly' ? 'month' : 'week', selectedPeriodType === 'monthly' ? String(selectedMonth) : selectedWeek)
 
     if (fetchExistingError) {
       return NextResponse.json(
@@ -130,9 +147,9 @@ export async function POST(request: NextRequest) {
 
     // Overwrite all stats for the selected week before inserting the new range.
     const { error: deleteError } = await supabase
-      .from('stats')
+      .from(tableName)
       .delete()
-      .eq('week', selectedWeek)
+      .eq(selectedPeriodType === 'monthly' ? 'month' : 'week', selectedPeriodType === 'monthly' ? String(selectedMonth) : selectedWeek)
 
     if (deleteError) {
       return NextResponse.json(
@@ -150,7 +167,7 @@ export async function POST(request: NextRequest) {
     const batchSize = 100
     for (let i = 0; i < dbRecords.length; i += batchSize) {
       const batch = dbRecords.slice(i, i + batchSize)
-      const { error } = await supabase.from('stats').insert(batch)
+      const { error } = await supabase.from(tableName).insert(batch)
 
       if (error) {
         failureCount += batch.length
@@ -158,14 +175,14 @@ export async function POST(request: NextRequest) {
 
         if (!restoreAttempted && existingRows && existingRows.length > 0) {
           const { error: deletePartialError } = await supabase
-            .from('stats')
+            .from(tableName)
             .delete()
-            .eq('week', selectedWeek)
+            .eq(selectedPeriodType === 'monthly' ? 'month' : 'week', selectedPeriodType === 'monthly' ? String(selectedMonth) : selectedWeek)
 
           if (deletePartialError) {
             errors.push(`Failed to clear partial import: ${deletePartialError.message}`)
           } else {
-            const { error: restoreError } = await supabase.from('stats').insert(existingRows)
+            const { error: restoreError } = await supabase.from(tableName).insert(existingRows)
             if (restoreError) {
               errors.push(`Failed to restore previous stats: ${restoreError.message}`)
             }
@@ -187,7 +204,7 @@ export async function POST(request: NextRequest) {
           imported: successCount,
           failed: failureCount,
           errors,
-          message: `Failed to import stats for week ${selectedWeek}, range ${selectedRange}`,
+          message: `Failed to import stats for ${selectedPeriodType === 'monthly' ? `month ${selectedMonth}` : `week ${selectedWeek}`}, range ${selectedRange}`,
         },
         { status: 500 }
       )
@@ -197,7 +214,7 @@ export async function POST(request: NextRequest) {
       success: true,
       imported: successCount,
       failed: failureCount,
-      message: `Successfully imported ${successCount} records for week ${selectedWeek}, range ${selectedRange}`,
+      message: `Successfully imported ${successCount} records for ${selectedPeriodType === 'monthly' ? `month ${selectedMonth}` : `week ${selectedWeek}`}, range ${selectedRange}`,
     })
   } catch (error: any) {
     console.error('Stats import error:', error)
