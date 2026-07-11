@@ -18,25 +18,43 @@ type ScheduleAgent = {
   present: boolean | null
 }
 
+const normalizeName = (value: string | null | undefined) =>
+  (value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '')
+    .trim()
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
     const teamLeader = searchParams.get('teamLeader')?.trim()
 
-    let query = supabase
+    const { data, error } = await supabase
       .from('agents')
       .select('name, team_leader, role, off_1, off_2, start_shift, end_shift, comments, present')
       .order('name', { ascending: true })
 
-    if (teamLeader) {
-      query = query.ilike('team_leader', teamLeader)
-    }
-
-    const { data, error } = await query
-
     if (error) throw error
 
-    const agents: ScheduleAgent[] = (data || []).map((agent) => ({
+    const allAgents = (data || []) as Array<{
+      name: string
+      team_leader: string | null
+      role: string | null
+      off_1: string | null
+      off_2: string | null
+      start_shift: string | null
+      end_shift: string | null
+      comments: string | null
+      present: boolean | null
+    }>
+
+    const filteredAgents = teamLeader
+      ? allAgents.filter((agent) => normalizeName(agent.team_leader) === normalizeName(teamLeader))
+      : allAgents
+
+    const agents: ScheduleAgent[] = (filteredAgents.length > 0 ? filteredAgents : allAgents).map((agent) => ({
       id: agent.name,
       name: agent.name,
       role: agent.role || '',

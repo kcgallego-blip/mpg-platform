@@ -188,6 +188,14 @@ const formatShiftDate = (date: Date) =>
     weekday: 'short',
   }).format(date)
 
+const normalizeNameValue = (value: string | null | undefined) =>
+  (value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '')
+    .trim()
+
 export default function DashboardPage() {
   const { user } = useAuthStore()
   const router = useRouter()
@@ -226,10 +234,24 @@ export default function DashboardPage() {
 
       const nextAgents = data.agents || []
       const nextSupervisors = data.supervisors || []
+      const preferredSupervisor = normalizeNameValue(user?.name)
+      const matchingSupervisor = nextSupervisors.find(
+        (supervisor) => normalizeNameValue(supervisor) === preferredSupervisor
+      )
 
       setAgents(nextAgents)
       setSupervisors(nextSupervisors)
-      setSelectedSupervisors((current) => current.length > 0 ? current : nextSupervisors)
+      setSelectedSupervisors((current) => {
+        if (current.length > 0) {
+          return current
+        }
+
+        if (matchingSupervisor) {
+          return [matchingSupervisor]
+        }
+
+        return nextSupervisors
+      })
     } catch (loadError: any) {
       setError(loadError.message || 'Unable to load schedule')
     } finally {
