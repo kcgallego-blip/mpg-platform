@@ -19,7 +19,7 @@ import {
 
 type AgentRow = Database['public']['Tables']['agents']['Row']
 type AgentInsert = Database['public']['Tables']['agents']['Insert']
-type AgentField = keyof AgentInsert
+type AgentField = keyof Omit<AgentInsert, 'present'>
 type AgentFormField = Exclude<AgentField, 'name'>
 
 type CsvAgent = { name: string } & Partial<Record<AgentField, string | null>>

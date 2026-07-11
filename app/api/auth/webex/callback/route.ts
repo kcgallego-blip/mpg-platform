@@ -79,7 +79,7 @@ export async function GET(request: NextRequest) {
 
     const { data: existingUser, error: existingUserError } = await supabase
       .from('users')
-      .select('email, role, access, registered_at, is_active')
+      .select('email, role, access, registered_at, is_active, name, avatar_image')
       .eq('email', email)
       .maybeSingle()
 
@@ -88,20 +88,18 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(new URL('/login?error=db_error', request.url))
     }
 
-    if (existingUser?.is_active !== true) {
-      const insertError = existingUser
-        ? null
-        : (await supabase
-          .from('users')
-          .insert({
-            email,
-            name,
-            avatar_image: avatar,
-            is_active: false,
-            registered_at: now,
-            role: 'Agent',
-            access: null,
-          })).error
+    if (!existingUser) {
+      const { error: insertError } = await supabase
+        .from('users')
+        .insert({
+          email,
+          name,
+          avatar_image: avatar,
+          is_active: false,
+          registered_at: now,
+          role: 'Agent',
+          access: null,
+        })
 
       if (insertError) {
         console.error('Database auth user save error:', insertError)
@@ -111,15 +109,27 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(new URL('/login?error=approval_required', request.url))
     }
 
+    if (existingUser.is_active !== true) {
+      return NextResponse.redirect(new URL('/login?error=approval_required', request.url))
+    }
+
     const sessionToken = createSessionToken()
+    const updatePayload: Record<string, string | null> = {
+      token: sessionToken,
+      last_login: now,
+    }
+
+    if (!existingUser.name) {
+      updatePayload.name = name
+    }
+
+    if (!existingUser.avatar_image) {
+      updatePayload.avatar_image = avatar
+    }
+
     const { error: dbError } = await supabase
       .from('users')
-      .update({
-        name,
-        token: sessionToken,
-        avatar_image: avatar,
-        last_login: now,
-      })
+      .update(updatePayload)
       .eq('email', email)
 
     if (dbError) {

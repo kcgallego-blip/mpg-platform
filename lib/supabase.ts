@@ -55,6 +55,7 @@ export type Database = {
           start_shift: string | null
           end_shift: string | null
           comments: string | null
+          present: boolean | null
         }
         Insert: {
           name: string
@@ -66,6 +67,7 @@ export type Database = {
           start_shift?: string | null
           end_shift?: string | null
           comments?: string | null
+          present?: boolean | null
         }
         Update: {
           name?: string
@@ -77,6 +79,7 @@ export type Database = {
           start_shift?: string | null
           end_shift?: string | null
           comments?: string | null
+          present?: boolean | null
         }
       }
       tickets: {

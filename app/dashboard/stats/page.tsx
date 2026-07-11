@@ -164,8 +164,11 @@ export default function StatsPage() {
     }
 
     const currentWeek = getStatsWeekNumber()
+    const oldestWeek = 23
+    const startWeek = currentWeek >= oldestWeek ? Math.max(oldestWeek, currentWeek - 11) : 1
+
     return Array.from(
-      { length: Math.min(currentWeek, 12) },
+      { length: currentWeek - startWeek + 1 },
       (_, index) => currentWeek - index
     )
   }, [periodType])

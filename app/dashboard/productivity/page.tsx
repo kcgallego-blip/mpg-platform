@@ -49,6 +49,7 @@ type AgentProductivity = {
   total: number
   statusCounts: Record<string, number>
   hourlyCounts: Record<string, number>
+  tphAverage: number
   firstTicketTime: string | null
   latestTicketTime: string | null
   shiftDuration: string
@@ -168,6 +169,66 @@ const hourSlots = Array.from({ length: 18 }, (_, index) => {
   }
 })
 
+const RELEVANT_TPH_STATUSES = ['Pending', 'On-Hold', 'Solved'] as const
+
+const normalizeRole = (role?: string | null) =>
+  (role || '')
+    .toLowerCase()
+    .replace(/[^a-z]+/g, '')
+    .trim()
+
+const isTeamLeaderRole = (role?: string | null) => normalizeRole(role) === 'teamleader'
+const isAllowedRole = (role?: string | null) => {
+  const normalizedRole = normalizeRole(role)
+  return ALLOWED_ROLES.some((allowed) => normalizeRole(allowed) === normalizedRole)
+}
+
+const getRelevantTphTicketTotal = (statusCounts: Record<string, number>) =>
+  RELEVANT_TPH_STATUSES.reduce((total, status) => {
+    return total + (statusCounts[status] || 0)
+  }, 0)
+
+const getActiveHourTphAverage = (statusCounts: Record<string, number>, hourlyCounts: Record<string, number>) => {
+  const relevantTicketTotal = getRelevantTphTicketTotal(statusCounts)
+  const activeHours = Object.values(hourlyCounts).filter((count) => count > 0).length
+
+  return activeHours > 0 ? relevantTicketTotal / activeHours : 0
+}
+
+const getDurationTphAverage = (statusCounts: Record<string, number>, durationMs: number) => {
+  const durationHours = durationMs / (60 * 60 * 1000)
+
+  return durationHours > 0 ? getRelevantTphTicketTotal(statusCounts) / durationHours : 0
+}
+
+const CompactHourlyStrip = ({
+  values,
+  maxValue,
+}: {
+  values: Record<string, number>
+  maxValue: number
+}) => {
+  const safeMax = Math.max(maxValue, 1)
+
+  return (
+    <div className="flex items-end gap-1">
+      {hourSlots.map((hour) => {
+        const count = values[hour.key] || 0
+        const opacity = count > 0 ? 0.2 + Math.min(0.8, count / safeMax) : 0.1
+
+        return (
+          <div
+            key={hour.key}
+            className="h-3 w-2 rounded-sm bg-primary-container/80"
+            style={{ opacity }}
+            title={`${hour.label}: ${count}`}
+          />
+        )
+      })}
+    </div>
+  )
+}
+
 export default function ProductivityPage() {
   const router = useRouter()
   const { user } = useAuthStore()
@@ -185,7 +246,10 @@ export default function ProductivityPage() {
   const [selectedAgentEmail, setSelectedAgentEmail] = useState<string | null>(null)
 
   const currentShiftDate = useMemo(() => getDateKey(getShiftDate(new Date())), [])
-  const isAllowed = !!user?.role && ALLOWED_ROLES.includes(user.role)
+  const isAllowed = isAllowedRole(user?.role)
+  const isTeamLeader = isTeamLeaderRole(user?.role)
+  const showTimeColumns = !isTeamLeader
+  const showTphColumn = isTeamLeader
 
   useEffect(() => {
     if (user?.role && !isAllowed) {
@@ -197,12 +261,13 @@ export default function ProductivityPage() {
     rows: AgentProductivity[],
     rowNames: Record<string, string>
   ) => {
-    if (user?.role !== 'Team Leader') return rows
+    if (!isTeamLeader) return rows
 
+    const teamLeaderName = user?.name || ''
     const { data: teamAgents, error: teamError } = await supabase
       .from('agents')
       .select('name')
-      .eq('team_leader', user.name || '')
+      .eq('team_leader', teamLeaderName)
 
     if (teamError) throw teamError
 
@@ -267,13 +332,15 @@ export default function ProductivityPage() {
         const nextRows = summaryRows.map<AgentProductivity>((row) => {
           const allStatusCounts = parseSummaryTickets(row.tickets)
           const statusCounts = getStatusFilteredCounts(allStatusCounts, selectedStatus)
+          const hourlyCounts = parseHourlyTickets(row.hourly_tickets)
 
           return {
             email: row.agent,
             name: namesByEmail[row.agent] || getEmailFallbackName(row.agent),
             total: getTotalTicketCount(statusCounts),
             statusCounts,
-            hourlyCounts: parseHourlyTickets(row.hourly_tickets),
+            hourlyCounts,
+            tphAverage: getActiveHourTphAverage(allStatusCounts, hourlyCounts),
             firstTicketTime: null,
             latestTicketTime: null,
             shiftDuration: '-',
@@ -318,6 +385,7 @@ export default function ProductivityPage() {
           total: 0,
           statusCounts: {},
           hourlyCounts: {},
+          tphAverage: 0,
           firstTicketTime: null,
           latestTicketTime: null,
           shiftDuration: '0h 0m',
@@ -353,6 +421,7 @@ export default function ProductivityPage() {
 
         return {
           ...row,
+          tphAverage: getDurationTphAverage(row.statusCounts, shiftDurationMs),
           shiftDurationMs,
           shiftDuration: formatDuration(shiftDurationMs),
         }
@@ -423,6 +492,10 @@ export default function ProductivityPage() {
           latestTicketTime: sortedSummary.latestTicketTime,
           shiftDuration: sortedSummary.shiftDuration,
           shiftDurationMs: sortedSummary.shiftDurationMs,
+          tphAverage:
+            row.source === 'tph'
+              ? getDurationTphAverage(row.statusCounts, sortedSummary.shiftDurationMs)
+              : row.tphAverage,
         }
       }
 
@@ -454,12 +527,18 @@ export default function ProductivityPage() {
         hourSlots.forEach((hour) => {
           summary.hourlyCounts[hour.key] = (summary.hourlyCounts[hour.key] || 0) + (row.hourlyCounts[hour.key] || 0)
         })
+        summary.shiftDurationMs += row.shiftDurationMs
+        summary.tphAverage = summary.shiftDurationMs > 0
+          ? getDurationTphAverage(summary.statusCounts, summary.shiftDurationMs)
+          : getActiveHourTphAverage(summary.statusCounts, summary.hourlyCounts)
         return summary
       },
       {
         tickets: 0,
         statusCounts: {} as Record<string, number>,
         hourlyCounts: {} as Record<string, number>,
+        tphAverage: 0,
+        shiftDurationMs: 0,
       }
     )
   }, [displayedProductivityRows])
@@ -468,6 +547,11 @@ export default function ProductivityPage() {
     if (!selectedAgentEmail) return []
     return tickets.filter((ticket) => ticket.agent === selectedAgentEmail)
   }, [selectedAgentEmail, tickets])
+
+  const maxHourlyBarValue = useMemo(() => {
+    const rowValues = displayedProductivityRows.map((row) => Math.max(...Object.values(row.hourlyCounts), 0))
+    return Math.max(1, ...rowValues)
+  }, [displayedProductivityRows])
 
   if (!isAllowed) {
     return (
@@ -624,8 +708,15 @@ export default function ProductivityPage() {
                     </th>
                   ))}
                   <th className="px-4 py-3 text-center text-label-md font-bold uppercase text-on-surface-variant">Total</th>
-                  <th className="px-4 py-3 text-center text-label-md font-bold uppercase text-on-surface-variant">First</th>
-                  <th className="px-4 py-3 text-center text-label-md font-bold uppercase text-on-surface-variant">Latest</th>
+                  {showTphColumn && (
+                    <th className="px-4 py-3 text-center text-label-md font-bold uppercase text-on-surface-variant">TPH</th>
+                  )}
+                  {showTimeColumns && (
+                    <>
+                      <th className="px-4 py-3 text-center text-label-md font-bold uppercase text-on-surface-variant">First</th>
+                      <th className="px-4 py-3 text-center text-label-md font-bold uppercase text-on-surface-variant">Latest</th>
+                    </>
+                  )}
                   <th className="px-4 py-3 text-center text-label-md font-bold uppercase text-on-surface-variant">Duration</th>
                 </tr>
               </thead>
@@ -642,8 +733,15 @@ export default function ProductivityPage() {
                       </td>
                     ))}
                     <td className="px-4 py-3 text-center text-sm font-bold text-primary-container">{row.total}</td>
-                    <td className="px-4 py-3 text-center text-sm font-semibold text-on-surface">{formatTicketTime(row.firstTicketTime)}</td>
-                    <td className="px-4 py-3 text-center text-sm font-semibold text-on-surface">{formatTicketTime(row.latestTicketTime)}</td>
+                    {showTphColumn && (
+                      <td className="px-4 py-3 text-center text-sm font-semibold text-on-surface">{row.tphAverage.toFixed(2)}</td>
+                    )}
+                    {showTimeColumns && (
+                      <>
+                        <td className="px-4 py-3 text-center text-sm font-semibold text-on-surface">{formatTicketTime(row.firstTicketTime)}</td>
+                        <td className="px-4 py-3 text-center text-sm font-semibold text-on-surface">{formatTicketTime(row.latestTicketTime)}</td>
+                      </>
+                    )}
                     <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">{row.shiftDuration}</td>
                   </tr>
                 ))}
@@ -656,63 +754,49 @@ export default function ProductivityPage() {
                       </td>
                     ))}
                     <td className="px-4 py-3 text-center text-sm font-bold text-primary-container">{totals.tickets}</td>
-                    <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">-</td>
-                    <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">-</td>
+                    {showTphColumn && (
+                      <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">{totals.tphAverage.toFixed(2)}</td>
+                    )}
+                    {showTimeColumns && (
+                      <>
+                        <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">-</td>
+                        <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">-</td>
+                      </>
+                    )}
                     <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">-</td>
                   </tr>
                 )}
               </tbody>
             </table>
           ) : (
-            <table className="min-w-full divide-y divide-outline-variant/60">
-              <thead className="bg-surface-container/80">
-                <tr>
-                  <th className="sticky left-0 z-10 bg-surface-container px-4 py-3 text-left text-label-md font-bold uppercase text-on-surface-variant">Agent</th>
-                  {hourSlots.map((hour) => (
-                    <th key={hour.key} className="min-w-20 px-4 py-3 text-center text-label-md font-bold uppercase text-on-surface-variant">
-                      {hour.label}
-                    </th>
-                  ))}
-                  <th className="min-w-20 px-4 py-3 text-center text-label-md font-bold uppercase text-on-surface-variant">Total</th>
-                  <th className="min-w-24 px-4 py-3 text-center text-label-md font-bold uppercase text-on-surface-variant">First</th>
-                  <th className="min-w-24 px-4 py-3 text-center text-label-md font-bold uppercase text-on-surface-variant">Latest</th>
-                  <th className="min-w-24 px-4 py-3 text-center text-label-md font-bold uppercase text-on-surface-variant">Duration</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-outline-variant/50">
+            <div className="space-y-2 p-4">
+              <div className="rounded-lg border border-outline-variant/60 bg-surface-container/40 p-3">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-label-md font-semibold uppercase text-on-surface-variant">Hourly Distribution</p>
+                    <p className="text-sm text-on-surface-variant">Compact hourly activity for each agent.</p>
+                  </div>
+                  <div className="rounded-full border border-outline-variant/60 bg-surface px-3 py-1 text-sm font-semibold text-on-surface">
+                    Max: {maxHourlyBarValue}
+                  </div>
+                </div>
                 {displayedProductivityRows.map((row) => (
-                  <tr key={row.email} className="cursor-pointer hover:bg-surface-container/60 transition" onClick={() => setSelectedAgentEmail(row.email)}>
-                    <td className="sticky left-0 z-10 min-w-64 bg-surface px-4 py-3">
-                      <p className="font-semibold text-on-surface">{row.name}</p>
-                      <p className="text-xs text-on-surface-variant">{row.email}</p>
-                    </td>
-                    {hourSlots.map((hour) => (
-                      <td key={hour.key} className="px-4 py-3 text-center text-sm font-semibold text-on-surface">
-                        {row.hourlyCounts[hour.key] || 0}
-                      </td>
-                    ))}
-                    <td className="px-4 py-3 text-center text-sm font-bold text-primary-container">{row.total}</td>
-                    <td className="px-4 py-3 text-center text-sm font-semibold text-on-surface">{formatTicketTime(row.firstTicketTime)}</td>
-                    <td className="px-4 py-3 text-center text-sm font-semibold text-on-surface">{formatTicketTime(row.latestTicketTime)}</td>
-                    <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">{row.shiftDuration}</td>
-                  </tr>
+                  <div key={row.email} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-outline-variant/60 bg-surface px-3 py-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-semibold text-on-surface">{row.name}</p>
+                      <p className="truncate text-xs text-on-surface-variant">{row.email}</p>
+                    </div>
+                    <div className="flex flex-1 items-center gap-2">
+                      <CompactHourlyStrip values={row.hourlyCounts} maxValue={maxHourlyBarValue} />
+                      <div className="flex items-center gap-2 text-xs font-semibold text-on-surface-variant">
+                        <span className="rounded-full bg-primary-container/15 px-2 py-0.5 text-primary-container">{row.total}</span>
+                        {showTphColumn && <span className="rounded-full bg-surface-container-high px-2 py-0.5">TPH {row.tphAverage.toFixed(2)}</span>}
+                      </div>
+                    </div>
+                  </div>
                 ))}
-                {displayedProductivityRows.length > 0 && (
-                  <tr className="bg-surface-container/70">
-                    <td className="sticky left-0 z-10 bg-surface-container px-4 py-3 font-bold text-on-surface">Total</td>
-                    {hourSlots.map((hour) => (
-                      <td key={hour.key} className="px-4 py-3 text-center text-sm font-bold text-on-surface">
-                        {totals.hourlyCounts[hour.key] || 0}
-                      </td>
-                    ))}
-                    <td className="px-4 py-3 text-center text-sm font-bold text-primary-container">{totals.tickets}</td>
-                    <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">-</td>
-                    <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">-</td>
-                    <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">-</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+              </div>
+            </div>
           )}
         </div>
 

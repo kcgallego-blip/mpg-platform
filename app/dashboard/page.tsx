@@ -17,6 +17,7 @@ type ScheduleAgent = {
   lunch: string
   break2: string
   supervisor: string
+  present: boolean | null
 }
 
 type ScheduleResponse = {
@@ -201,8 +202,8 @@ export default function DashboardPage() {
   const [agents, setAgents] = useState<ScheduleAgent[]>([])
   const [supervisors, setSupervisors] = useState<string[]>([])
   const [selectedSupervisors, setSelectedSupervisors] = useState<string[]>([])
-  const [absentAgentIds, setAbsentAgentIds] = useState<string[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [isUpdatingPresence, setIsUpdatingPresence] = useState(false)
   const [error, setError] = useState('')
   const [now, setNow] = useState(() => new Date())
   const [viewType, setViewType] = useState<'kanban' | 'table'>('kanban')
@@ -215,7 +216,8 @@ export default function DashboardPage() {
 
       setError('')
 
-      const response = await fetch('/api/schedule', { cache: 'no-store' })
+      const teamLeaderFilter = user?.name ? `?teamLeader=${encodeURIComponent(user.name)}` : ''
+      const response = await fetch(`/api/schedule${teamLeaderFilter}`, { cache: 'no-store' })
       const data = (await response.json()) as Partial<ScheduleResponse> & { error?: string }
 
       if (!response.ok) {
@@ -235,7 +237,7 @@ export default function DashboardPage() {
         setIsLoading(false)
       }
     }
-  }, [])
+  }, [user?.name])
 
   useEffect(() => {
     loadSchedule(true)
@@ -269,23 +271,40 @@ export default function DashboardPage() {
   )
 
   const currentShift = useMemo(() => getCurrentShiftInfo(now), [now])
-  const shiftKey = useMemo(() => getShiftKey(currentShift.shiftDate), [currentShift.shiftDate])
 
-  useEffect(() => {
-    const storedAbsences = window.localStorage.getItem(`dashboard-absent-${shiftKey}`)
-    setAbsentAgentIds(storedAbsences ? JSON.parse(storedAbsences) : [])
-  }, [shiftKey])
+  const updateAgentPresence = useCallback(async (agentId: string, nextPresent: boolean) => {
+    const agent = agents.find((item) => item.id === agentId)
 
-  const saveAbsentAgentIds = useCallback(
-    (nextAbsentAgentIds: string[]) => {
-      setAbsentAgentIds(nextAbsentAgentIds)
-      window.localStorage.setItem(
-        `dashboard-absent-${shiftKey}`,
-        JSON.stringify(nextAbsentAgentIds)
+    if (!agent) {
+      return
+    }
+
+    const previousPresent = agent.present
+    setAgents((current) =>
+      current.map((item) => (item.id === agentId ? { ...item, present: nextPresent } : item))
+    )
+    setIsUpdatingPresence(true)
+
+    try {
+      const response = await fetch('/api/schedule', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentName: agent.name, present: nextPresent }),
+      })
+      const data = (await response.json()) as { error?: string }
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Unable to update agent presence')
+      }
+    } catch (updateError: any) {
+      setAgents((current) =>
+        current.map((item) => (item.id === agentId ? { ...item, present: previousPresent } : item))
       )
-    },
-    [shiftKey]
-  )
+      setError(updateError.message || 'Unable to update agent presence')
+    } finally {
+      setIsUpdatingPresence(false)
+    }
+  }, [agents])
 
   const handleAgentCardClick = useCallback(
     (agent: BoardAgent) => {
@@ -293,27 +312,21 @@ export default function DashboardPage() {
         return
       }
 
-      if (agent.status === 'absent') {
-        const shouldRemoveAbsent = window.confirm(
-          `Remove ${agent.name} from Absent for this shift?`
-        )
+      const isCurrentlyAbsent = agent.present === false
+      const nextPresent = isCurrentlyAbsent
+      const confirmationMessage = isCurrentlyAbsent
+        ? `Mark ${agent.name} as present for this shift?`
+        : `Mark ${agent.name} as absent for this shift?`
 
-        if (shouldRemoveAbsent) {
-          saveAbsentAgentIds(absentAgentIds.filter((agentId) => agentId !== agent.id))
-        }
+      const shouldTogglePresence = window.confirm(confirmationMessage)
 
+      if (!shouldTogglePresence) {
         return
       }
 
-      const shouldMarkAbsent = window.confirm(
-        `Mark ${agent.name} as absent for this shift?`
-      )
-
-      if (shouldMarkAbsent) {
-        saveAbsentAgentIds(Array.from(new Set([...absentAgentIds, agent.id])))
-      }
+      void updateAgentPresence(agent.id, nextPresent)
     },
-    [absentAgentIds, saveAbsentAgentIds]
+    [updateAgentPresence]
   )
 
   const boardAgents = useMemo(
@@ -329,7 +342,7 @@ export default function DashboardPage() {
           currentShift.shiftDate
         )
 
-        if (absentAgentIds.includes(agent.id)) {
+        if (agent.present === false) {
           return {
             ...agent,
             status: 'absent' as const,
@@ -362,7 +375,6 @@ export default function DashboardPage() {
       currentShift.phDate,
       currentShift.shiftDay,
       currentShift.shiftDate,
-      absentAgentIds,
       selectedAgents,
     ]
   )
@@ -446,7 +458,7 @@ export default function DashboardPage() {
             Daily agent status board
           </h1>
           <p className="mt-2 max-w-2xl text-on-surface-variant">
-            View scheduled agents by team leader. Status is based only on schedule.csv and refreshes every 5-minute mark in PH time.
+            View scheduled agents by team leader. Presence is pulled from the agents roster and can be toggled here for the current shift.
           </p>
         </div>
 

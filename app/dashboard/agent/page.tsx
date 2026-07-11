@@ -100,6 +100,42 @@ const hourSlots = Array.from({ length: 18 }, (_, index) => {
   }
 })
 
+const HourlyBarChart = ({
+  values,
+  maxValue,
+}: {
+  values: Record<string, number>
+  maxValue: number
+}) => {
+  const safeMax = Math.max(maxValue, 1)
+
+  return (
+    <div className="rounded-lg border border-outline-variant/60 bg-surface-container/40 p-4">
+      <div className="flex h-48 items-end justify-between gap-2">
+        {hourSlots.map((hour) => {
+          const count = values[hour.key] || 0
+          const heightPercent = count > 0 ? Math.max(10, Math.round((count / safeMax) * 100)) : 0
+
+          return (
+            <div key={hour.key} className="flex flex-1 flex-col items-center gap-2">
+              <div className="flex h-36 w-full items-end justify-center rounded-t-lg bg-surface/70 p-1">
+                <div
+                  className="w-full rounded-t-lg bg-primary-container/80"
+                  style={{ height: `${heightPercent}%` }}
+                />
+              </div>
+              <div className="text-center">
+                <p className="text-label-sm font-semibold uppercase text-on-surface-variant">{hour.label}</p>
+                <p className="font-hanken text-title-sm font-bold text-on-surface">{count}</p>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 export default function AgentDashboardPage() {
   const { user } = useAuthStore()
   const [tickets, setTickets] = useState<TphTicket[]>([])
@@ -203,6 +239,7 @@ export default function AgentDashboardPage() {
     [hourlyCounts]
   )
   const ticketsPerHour = activeHourlySlots > 0 ? summaryTotalTickets / activeHourlySlots : 0
+  const maxHourlyBarValue = useMemo(() => Math.max(1, ...Object.values(hourlyCounts)), [hourlyCounts])
 
   if (isLoading) {
     return (
@@ -332,18 +369,16 @@ export default function AgentDashboardPage() {
           </section>
 
           <section className="rounded-lg border border-outline-variant/60 bg-surface/90 p-4">
-            <div className="mb-4 flex items-center gap-2">
-              <BarChart3 size={18} className="text-primary-container" />
-              <h2 className="font-hanken text-body-md font-bold text-on-surface">Hourly Tickets</h2>
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <BarChart3 size={18} className="text-primary-container" />
+                <h2 className="font-hanken text-body-md font-bold text-on-surface">Hourly Tickets</h2>
+              </div>
+              <div className="rounded-full border border-outline-variant/60 bg-surface px-3 py-1 text-sm font-semibold text-on-surface">
+                Max: {maxHourlyBarValue}
+              </div>
             </div>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-6 xl:grid-cols-9">
-              {hourSlots.map((hour) => (
-                <div key={hour.key} className="rounded-lg border border-outline-variant/60 bg-white px-3 py-2 text-center">
-                  <p className="text-label-md font-bold uppercase text-on-surface-variant">{hour.label}</p>
-                  <p className="mt-1 font-hanken text-title-lg font-bold text-on-surface">{hourlyCounts[hour.key] || 0}</p>
-                </div>
-              ))}
-            </div>
+            <HourlyBarChart values={hourlyCounts} maxValue={maxHourlyBarValue} />
           </section>
 
           {summaryTotalTickets === 0 && (
@@ -356,18 +391,16 @@ export default function AgentDashboardPage() {
         <>
           {showHourlyBreakdown && (
             <section className="rounded-lg border border-outline-variant/60 bg-surface/90 p-4">
-              <div className="mb-4 flex items-center gap-2">
-                <BarChart3 size={18} className="text-primary-container" />
-                <h2 className="font-hanken text-body-md font-bold text-on-surface">Hourly Breakdown</h2>
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <BarChart3 size={18} className="text-primary-container" />
+                  <h2 className="font-hanken text-body-md font-bold text-on-surface">Hourly Breakdown</h2>
+                </div>
+                <div className="rounded-full border border-outline-variant/60 bg-surface px-3 py-1 text-sm font-semibold text-on-surface">
+                  Max: {maxHourlyBarValue}
+                </div>
               </div>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-6 xl:grid-cols-9">
-                {hourSlots.map((hour) => (
-                  <div key={hour.key} className="rounded-lg border border-outline-variant/60 bg-white px-3 py-2 text-center">
-                    <p className="text-label-md font-bold uppercase text-on-surface-variant">{hour.label}</p>
-                    <p className="mt-1 font-hanken text-title-lg font-bold text-on-surface">{hourlyCounts[hour.key] || 0}</p>
-                  </div>
-                ))}
-              </div>
+              <HourlyBarChart values={hourlyCounts} maxValue={maxHourlyBarValue} />
             </section>
           )}
 

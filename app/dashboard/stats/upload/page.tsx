@@ -25,8 +25,12 @@ import {
 export default function StatsUploadPage() {
   const { user } = useAuthStore()
   const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [success, setSuccess] = useState('')
+  const [notification, setNotification] = useState<{
+    type: 'success' | 'error'
+    title: string
+    message: string
+    details?: string
+  } | null>(null)
   const [file, setFile] = useState<File | null>(null)
   const [isDragActive, setIsDragActive] = useState(false)
   const [uploadResult, setUploadResult] = useState<{
@@ -58,6 +62,23 @@ export default function StatsUploadPage() {
       setSelectedEndDate(weekDateOptions[weekDateOptions.length - 1])
     }
   }, [selectedWeek, selectedEndDate, weekDateOptions])
+
+  useEffect(() => {
+    if (!notification) return
+
+    const timer = window.setTimeout(() => {
+      setNotification(null)
+    }, 5000)
+
+    return () => window.clearTimeout(timer)
+  }, [notification])
+
+  const showNotification = useCallback(
+    (type: 'success' | 'error', title: string, message: string, details?: string) => {
+      setNotification({ type, title, message, details })
+    },
+    []
+  )
 
   // Check authorization
   const userRole = user?.role?.toLowerCase()
@@ -103,9 +124,9 @@ export default function StatsUploadPage() {
       const droppedFile = files[0]
       if (droppedFile.name.endsWith('.csv')) {
         setFile(droppedFile)
-        setError('')
+        setNotification(null)
       } else {
-        setError('Please upload a CSV file')
+        showNotification('error', 'Upload required', 'Please upload a CSV file')
       }
     }
   }
@@ -113,35 +134,35 @@ export default function StatsUploadPage() {
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       setFile(e.target.files[0])
-      setError('')
+      setNotification(null)
     }
   }
 
   const handleUpload = useCallback(async () => {
     if (!file) {
-      setError('Please select a file first')
+      showNotification('error', 'Upload required', 'Please select a file first')
       return
     }
 
     if (periodType === 'weekly' && (!Number.isInteger(selectedWeek) || selectedWeek < 1)) {
-      setError('Please select a valid stats week')
+      showNotification('error', 'Invalid week', 'Please select a valid stats week')
       return
     }
 
     if (periodType === 'monthly' && (!Number.isInteger(selectedMonth) || selectedMonth < 1 || selectedMonth > 12)) {
-      setError('Please select a valid stats month')
+      showNotification('error', 'Invalid month', 'Please select a valid stats month')
       return
     }
 
     if (periodType === 'weekly' && (!Number.isInteger(selectedRange) || selectedRange < 1 || selectedRange > 7)) {
-      setError('Please select a valid stats range end date')
+      showNotification('error', 'Invalid range', 'Please select a valid stats range end date')
       return
     }
 
     try {
       setIsLoading(true)
-      setError('')
-      setSuccess('')
+      setNotification(null)
+      setUploadResult(null)
 
       // Read file content
       const csvContent = await file.text()
@@ -165,20 +186,26 @@ export default function StatsUploadPage() {
       }
 
       const result = await response.json()
+      const importedCount = result.imported ?? 0
+      const failedCount = result.failed ?? 0
+      const detailText = failedCount > 0
+        ? `Imported ${importedCount} records • Failed ${failedCount} records`
+        : `Imported ${importedCount} records`
+
       setUploadResult({
-        imported: result.imported,
-        failed: result.failed,
+        imported: importedCount,
+        failed: failedCount,
         message: result.message,
       })
-      setSuccess(result.message)
+      showNotification('success', 'Upload complete', result.message, detailText)
       setFile(null)
     } catch (err: any) {
-      setError(err.message || 'Failed to upload file')
+      showNotification('error', 'Upload failed', err.message || 'Failed to upload file')
       console.error('Upload error:', err)
     } finally {
       setIsLoading(false)
     }
-  }, [file, periodType, selectedMonth, selectedWeek, selectedRange])
+  }, [file, periodType, selectedMonth, selectedWeek, selectedRange, showNotification])
 
   return (
     <div className="space-y-6 pb-8">
@@ -195,32 +222,36 @@ export default function StatsUploadPage() {
         </p>
       </div>
 
-      {/* Error Alert */}
-      {error && (
-        <div className="flex gap-3 rounded-lg border border-error/30 bg-error/10 p-4">
-          <AlertCircle size={20} className="mt-0.5 flex-shrink-0 text-error" />
-          <div>
-            <p className="font-medium text-error">Error</p>
-            <p className="text-sm text-error/80">{error}</p>
-          </div>
-        </div>
-      )}
-
-      {/* Success Alert */}
-      {success && (
-        <div className="flex gap-3 rounded-lg border border-success/30 bg-success/10 p-4">
-          <CheckCircle size={20} className="mt-0.5 flex-shrink-0 text-success" />
-          <div>
-            <p className="font-medium text-success">Success</p>
-            <p className="text-sm text-success/80">{success}</p>
-            {uploadResult && (
-              <div className="mt-2 space-y-1 text-sm">
-                <p>✓ Imported: <span className="font-medium">{uploadResult.imported} records</span></p>
-                {uploadResult.failed > 0 && (
-                  <p>✗ Failed: <span className="font-medium text-error">{uploadResult.failed} records</span></p>
-                )}
-              </div>
-            )}
+      {notification && (
+        <div className={`pointer-events-auto fixed right-4 top-4 z-50 max-w-md rounded-xl border p-4 shadow-lg backdrop-blur-sm ${notification.type === 'success' ? 'border-success/30 bg-success/10' : 'border-error/30 bg-error/10'}`}>
+          <div className="flex items-start gap-3">
+            <div className={`mt-0.5 rounded-full p-2 ${notification.type === 'success' ? 'bg-success/15' : 'bg-error/15'}`}>
+              {notification.type === 'success' ? (
+                <CheckCircle size={18} className="text-success" />
+              ) : (
+                <AlertCircle size={18} className="text-error" />
+              )}
+            </div>
+            <div className="flex-1">
+              <p className={`font-semibold ${notification.type === 'success' ? 'text-success' : 'text-error'}`}>
+                {notification.title}
+              </p>
+              <p className={`mt-1 text-sm ${notification.type === 'success' ? 'text-success/80' : 'text-error/80'}`}>
+                {notification.message}
+              </p>
+              {notification.details && (
+                <p className={`mt-2 text-sm ${notification.type === 'success' ? 'text-success/80' : 'text-error/80'}`}>
+                  {notification.details}
+                </p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setNotification(null)}
+              className={`rounded-full p-1 transition hover:opacity-80 ${notification.type === 'success' ? 'text-success/80' : 'text-error/80'}`}
+            >
+              <X size={16} />
+            </button>
           </div>
         </div>
       )}
@@ -387,7 +418,7 @@ export default function StatsUploadPage() {
                 <button
                   onClick={() => {
                     setFile(null)
-                    setSuccess('')
+                    setNotification(null)
                     setUploadResult(null)
                   }}
                   disabled={isLoading}

@@ -1,6 +1,5 @@
-import { readFile } from 'fs/promises'
-import path from 'path'
 import { NextResponse } from 'next/server'
+import { supabase } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
 
@@ -16,77 +15,41 @@ type ScheduleAgent = {
   lunch: string
   break2: string
   supervisor: string
+  present: boolean | null
 }
 
-const parseCsvLine = (line: string) => {
-  const values: string[] = []
-  let current = ''
-  let inQuotes = false
-
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index]
-    const nextChar = line[index + 1]
-
-    if (char === '"' && nextChar === '"') {
-      current += '"'
-      index += 1
-      continue
-    }
-
-    if (char === '"') {
-      inQuotes = !inQuotes
-      continue
-    }
-
-    if (char === ',' && !inQuotes) {
-      values.push(current.trim())
-      current = ''
-      continue
-    }
-
-    current += char
-  }
-
-  values.push(current.trim())
-  return values
-}
-
-const normalizeHeader = (header: string) => header.trim().toLowerCase()
-
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const schedulePath = path.resolve(process.cwd(), 'schedule.csv')
-    const csv = await readFile(schedulePath, 'utf8')
-    const rows = csv
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean)
+    const { searchParams } = new URL(request.url)
+    const teamLeader = searchParams.get('teamLeader')?.trim()
 
-    const [headerLine, ...dataLines] = rows
-    const headers = parseCsvLine(headerLine).map(normalizeHeader)
+    let query = supabase
+      .from('agents')
+      .select('name, team_leader, role, off_1, off_2, start_shift, end_shift, comments, present')
+      .order('name', { ascending: true })
 
-    const getValue = (values: string[], label: string) => {
-      const index = headers.indexOf(normalizeHeader(label))
-      return index >= 0 ? values[index] || '' : ''
+    if (teamLeader) {
+      query = query.ilike('team_leader', teamLeader)
     }
 
-    const agents: ScheduleAgent[] = dataLines.map((line) => {
-      const values = parseCsvLine(line)
+    const { data, error } = await query
 
-      return {
-        id: getValue(values, 'Sch# (do not change)'),
-        name: getValue(values, 'Agent Name'),
-        role: getValue(values, 'Role'),
-        dayOff1: getValue(values, 'Day OFF 1'),
-        dayOff2: getValue(values, 'Day OFF 2'),
-        startShift: getValue(values, 'Start Shift'),
-        endShift: getValue(values, 'End Shift'),
-        break1: getValue(values, 'Break 1'),
-        lunch: getValue(values, 'Lunch'),
-        break2: getValue(values, 'Break 2'),
-        supervisor: getValue(values, 'Supervisor'),
-      }
-    })
+    if (error) throw error
+
+    const agents: ScheduleAgent[] = (data || []).map((agent) => ({
+      id: agent.name,
+      name: agent.name,
+      role: agent.role || '',
+      dayOff1: agent.off_1 || '',
+      dayOff2: agent.off_2 || '',
+      startShift: agent.start_shift || '',
+      endShift: agent.end_shift || '',
+      break1: '',
+      lunch: '',
+      break2: '',
+      supervisor: agent.team_leader || '',
+      present: agent.present ?? true,
+    }))
 
     const supervisors = Array.from(
       new Set(agents.map((agent) => agent.supervisor).filter(Boolean))
@@ -97,9 +60,36 @@ export async function GET() {
       supervisors,
     })
   } catch (error: any) {
-    console.error('Error reading schedule CSV:', error)
+    console.error('Error loading schedule from agents table:', error)
     return NextResponse.json(
-      { error: error.message || 'Unable to read schedule CSV' },
+      { error: error.message || 'Unable to load schedule' },
+      { status: 500 }
+    )
+  }
+}
+
+export async function PATCH(request: Request) {
+  try {
+    const payload = await request.json()
+    const agentName = typeof payload?.agentName === 'string' ? payload.agentName.trim() : ''
+    const present = typeof payload?.present === 'boolean' ? payload.present : null
+
+    if (!agentName) {
+      return NextResponse.json({ error: 'Agent name is required' }, { status: 400 })
+    }
+
+    const { error } = await supabase
+      .from('agents')
+      .update({ present })
+      .eq('name', agentName)
+
+    if (error) throw error
+
+    return NextResponse.json({ success: true, agentName, present })
+  } catch (error: any) {
+    console.error('Error updating agent presence:', error)
+    return NextResponse.json(
+      { error: error.message || 'Unable to update agent presence' },
       { status: 500 }
     )
   }
