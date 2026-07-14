@@ -216,8 +216,12 @@ export function isScorePassing(
       if (seconds === null) return false
       return seconds <= criteria.maxSeconds
     } else if (criteria.type === 'percentage' && 'minPercentage' in criteria) {
-      const percentage = typeof value === 'string' ? parsePercentage(value) : value
+      let percentage = typeof value === 'string' ? parsePercentage(value) : value
       if (percentage === null) return false
+      // Normalize percentage to 0-100 range if it's in decimal form (0-1)
+      if (typeof percentage === 'number' && percentage > 0 && percentage < 1) {
+        percentage = percentage * 100
+      }
       return percentage >= criteria.minPercentage
     } else if (criteria.type === 'number' && 'minValue' in criteria) {
       const numValue = typeof value === 'string' ? parseFloat(value) : value

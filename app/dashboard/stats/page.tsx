@@ -185,7 +185,6 @@ export default function StatsPage() {
       setError('')
 
       const queryParams = new URLSearchParams({
-        search: searchQuery,
         supervisor: selectedSupervisor,
         sortBy: sortConfig.field,
         sortOrder: sortConfig.order,
@@ -220,7 +219,7 @@ export default function StatsPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [user?.email, searchQuery, selectedSupervisor, sortConfig, periodType, selectedMonth, selectedWeek, router])
+  }, [user?.email, selectedSupervisor, sortConfig, periodType, selectedMonth, selectedWeek, router])
 
   useEffect(() => {
     loadStats()
@@ -232,6 +231,16 @@ export default function StatsPage() {
       order: prevConfig.field === field && prevConfig.order === 'asc' ? 'desc' : 'asc',
     }))
   }
+
+  // Client-side filtering based on search query
+  const filteredStats = useMemo(() => {
+    if (!searchQuery.trim()) return stats
+    const query = searchQuery.toLowerCase()
+    return stats.filter(stat =>
+      stat.name.toLowerCase().includes(query) ||
+      stat.supervisor?.toLowerCase().includes(query)
+    )
+  }, [stats, searchQuery])
 
   const getScoreColor = (fieldName: string, value: string | number | null | undefined) => {
     if (isNAField(fieldName)) return ''
@@ -696,7 +705,14 @@ export default function StatsPage() {
         <div className="flex flex-col items-center justify-center rounded-lg border border-outline-variant/60 bg-surface/70 py-16">
           <AlertCircle size={40} className="mb-4 text-on-surface-variant/40" />
           <p className="text-on-surface-variant">
-            {searchQuery ? `No agents found matching your search for ${periodType === 'monthly' ? 'the selected month' : `Week ${selectedWeek}`} (${displayedDateRange}).` : `No stats available for ${periodType === 'monthly' ? 'the selected month' : `Week ${selectedWeek}`} (${displayedDateRange}).`}
+            {searchQuery ? `No agents found matching "${searchQuery}" for ${periodType === 'monthly' ? 'the selected month' : `Week ${selectedWeek}`} (${displayedDateRange}).` : `No stats available for ${periodType === 'monthly' ? 'the selected month' : `Week ${selectedWeek}`} (${displayedDateRange}).`}
+          </p>
+        </div>
+      ) : filteredStats.length === 0 ? (
+        <div className="flex flex-col items-center justify-center rounded-lg border border-outline-variant/60 bg-surface/70 py-16">
+          <AlertCircle size={40} className="mb-4 text-on-surface-variant/40" />
+          <p className="text-on-surface-variant">
+            No agents found matching "{searchQuery}" for {periodType === 'monthly' ? 'the selected month' : `Week ${selectedWeek}`}.
           </p>
         </div>
       ) : (
@@ -712,7 +728,7 @@ export default function StatsPage() {
               </tr>
             </thead>
             <tbody>
-              {stats.map((stat, idx) => (
+              {filteredStats.map((stat, idx) => (
                 <tr
                   key={stat.id}
                   className={`border-b border-outline-variant/30 transition hover:bg-surface-dim ${

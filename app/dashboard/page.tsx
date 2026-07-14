@@ -210,6 +210,7 @@ export default function DashboardPage() {
   const [agents, setAgents] = useState<ScheduleAgent[]>([])
   const [supervisors, setSupervisors] = useState<string[]>([])
   const [selectedSupervisors, setSelectedSupervisors] = useState<string[]>([])
+  const [selectedRoles, setSelectedRoles] = useState<string[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isUpdatingPresence, setIsUpdatingPresence] = useState(false)
   const [error, setError] = useState('')
@@ -287,10 +288,35 @@ export default function DashboardPage() {
     }
   }, [loadSchedule])
 
-  const selectedAgents = useMemo(
-    () => agents.filter((agent) => selectedSupervisors.includes(agent.supervisor)),
-    [agents, selectedSupervisors]
+  const roleOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          agents
+            .map((agent) => agent.role?.trim())
+            .filter((role): role is string => Boolean(role))
+        )
+      ).sort((a, b) => a.localeCompare(b)),
+    [agents]
   )
+
+  const selectedAgents = useMemo(() => {
+    const normalizedSelectedSupervisors = new Set(
+      selectedSupervisors.map((supervisor) => normalizeNameValue(supervisor))
+    )
+    const normalizedSelectedRoles = new Set(selectedRoles.map((role) => normalizeNameValue(role)))
+
+    return agents.filter((agent) => {
+      const matchesSupervisor =
+        selectedSupervisors.length === 0 ||
+        normalizedSelectedSupervisors.has(normalizeNameValue(agent.supervisor))
+      const matchesRole =
+        selectedRoles.length === 0 ||
+        normalizedSelectedRoles.has(normalizeNameValue(agent.role))
+
+      return matchesSupervisor && matchesRole
+    })
+  }, [agents, selectedRoles, selectedSupervisors])
 
   const currentShift = useMemo(() => getCurrentShiftInfo(now), [now])
 
@@ -486,6 +512,43 @@ export default function DashboardPage() {
 
         <div className="flex w-full flex-col gap-4 sm:flex-row sm:items-end sm:gap-4">
           <div className="flex flex-col gap-2">
+            <span className="text-label-md font-semibold text-on-surface">Roles</span>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => setSelectedRoles(roleOptions)}
+                className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                  selectedRoles.length === 0 || selectedRoles.length === roleOptions.length
+                    ? 'bg-primary-container text-on-primary-container'
+                    : 'border border-outline-variant bg-surface text-on-surface hover:border-primary-container'
+                }`}
+                disabled={isLoading || roleOptions.length === 0}
+              >
+                All
+              </button>
+              {roleOptions.map((role) => (
+                <button
+                  key={role}
+                  onClick={() => {
+                    setSelectedRoles((current) =>
+                      current.includes(role)
+                        ? current.filter((item) => item !== role)
+                        : [...current, role]
+                    )
+                  }}
+                  className={`rounded-lg px-3 py-2 text-sm font-semibold transition ${
+                    selectedRoles.includes(role)
+                      ? 'bg-primary-container text-on-primary-container'
+                      : 'border border-outline-variant bg-surface text-on-surface hover:border-primary-container'
+                  }`}
+                  disabled={isLoading}
+                >
+                  {role}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2">
             <span className="text-label-md font-semibold text-on-surface">Team leaders</span>
             <div className="flex flex-wrap gap-2">
               <button
@@ -568,14 +631,12 @@ export default function DashboardPage() {
         <div className="glass-effect rounded-lg p-5 backdrop-blur-glass-lg">
           <div className="flex items-center gap-3 text-on-surface-variant">
             <CalendarDays size={20} />
-            <span className="text-label-md font-semibold uppercase">Team Leaders</span>
+            <span className="text-label-md font-semibold uppercase">Current Filters</span>
           </div>
           <p className="mt-3 truncate font-hanken text-headline-md font-bold text-on-surface">
-            {selectedSupervisors.length === 0
-              ? 'None'
-              : selectedSupervisors.length === supervisors.length
-                ? 'All'
-                : selectedSupervisors.join(', ')}
+            {selectedRoles.length === 0 || selectedRoles.length === roleOptions.length
+              ? 'All roles'
+              : selectedRoles.join(', ')}
           </p>
         </div>
         <div className="glass-effect rounded-lg p-5 backdrop-blur-glass-lg">

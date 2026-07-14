@@ -191,14 +191,16 @@ const getRelevantTphTicketTotal = (statusCounts: Record<string, number>) =>
 const getActiveHourTphAverage = (statusCounts: Record<string, number>, hourlyCounts: Record<string, number>) => {
   const relevantTicketTotal = getRelevantTphTicketTotal(statusCounts)
   const activeHours = Object.values(hourlyCounts).filter((count) => count > 0).length
+  const adjustedActiveHours = activeHours > 5 ? activeHours - 1 : activeHours
 
-  return activeHours > 0 ? relevantTicketTotal / activeHours : 0
+  return adjustedActiveHours > 0 ? relevantTicketTotal / adjustedActiveHours : 0
 }
 
 const getDurationTphAverage = (statusCounts: Record<string, number>, durationMs: number) => {
   const durationHours = durationMs / (60 * 60 * 1000)
+  const adjustedDurationHours = durationHours > 5 ? durationHours - 1 : durationHours
 
-  return durationHours > 0 ? getRelevantTphTicketTotal(statusCounts) / durationHours : 0
+  return adjustedDurationHours > 0 ? getRelevantTphTicketTotal(statusCounts) / adjustedDurationHours : 0
 }
 
 const CompactHourlyStrip = ({
@@ -248,8 +250,7 @@ export default function ProductivityPage() {
   const currentShiftDate = useMemo(() => getDateKey(getShiftDate(new Date())), [])
   const isAllowed = isAllowedRole(user?.role)
   const isTeamLeader = isTeamLeaderRole(user?.role)
-  const showTimeColumns = !isTeamLeader
-  const showTphColumn = isTeamLeader
+  const showTphColumn = isAllowed
 
   useEffect(() => {
     if (user?.role && !isAllowed) {
@@ -711,12 +712,6 @@ export default function ProductivityPage() {
                   {showTphColumn && (
                     <th className="px-4 py-3 text-center text-label-md font-bold uppercase text-on-surface-variant">TPH</th>
                   )}
-                  {showTimeColumns && (
-                    <>
-                      <th className="px-4 py-3 text-center text-label-md font-bold uppercase text-on-surface-variant">First</th>
-                      <th className="px-4 py-3 text-center text-label-md font-bold uppercase text-on-surface-variant">Latest</th>
-                    </>
-                  )}
                   <th className="px-4 py-3 text-center text-label-md font-bold uppercase text-on-surface-variant">Duration</th>
                 </tr>
               </thead>
@@ -736,12 +731,6 @@ export default function ProductivityPage() {
                     {showTphColumn && (
                       <td className="px-4 py-3 text-center text-sm font-semibold text-on-surface">{row.tphAverage.toFixed(2)}</td>
                     )}
-                    {showTimeColumns && (
-                      <>
-                        <td className="px-4 py-3 text-center text-sm font-semibold text-on-surface">{formatTicketTime(row.firstTicketTime)}</td>
-                        <td className="px-4 py-3 text-center text-sm font-semibold text-on-surface">{formatTicketTime(row.latestTicketTime)}</td>
-                      </>
-                    )}
                     <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">{row.shiftDuration}</td>
                   </tr>
                 ))}
@@ -756,12 +745,6 @@ export default function ProductivityPage() {
                     <td className="px-4 py-3 text-center text-sm font-bold text-primary-container">{totals.tickets}</td>
                     {showTphColumn && (
                       <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">{totals.tphAverage.toFixed(2)}</td>
-                    )}
-                    {showTimeColumns && (
-                      <>
-                        <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">-</td>
-                        <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">-</td>
-                      </>
                     )}
                     <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">-</td>
                   </tr>

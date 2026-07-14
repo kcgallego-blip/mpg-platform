@@ -404,6 +404,23 @@ export default function AgentDashboardPage() {
             </section>
           )}
 
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="rounded-lg border border-outline-variant/60 bg-surface/90 p-4">
+              <div className="flex items-center gap-2 text-on-surface-variant">
+                <Sigma size={18} className="text-primary-container" />
+                <p className="text-label-md font-semibold uppercase">Total Tickets</p>
+              </div>
+              <p className="mt-3 font-hanken text-headline-md font-bold text-on-surface">{summaryTotalTickets}</p>
+            </div>
+            <div className="rounded-lg border border-outline-variant/60 bg-surface/90 p-4">
+              <div className="flex items-center gap-2 text-on-surface-variant">
+                <Ticket size={18} className="text-primary-container" />
+                <p className="text-label-md font-semibold uppercase">Processed Tickets</p>
+              </div>
+              <p className="mt-3 font-hanken text-headline-md font-bold text-on-surface">{summaryTotalTickets - (statusCounts['Open'] || 0)}</p>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
             {STATUS_LANES.map((lane) => {
               const laneTickets = ticketsByStatus(lane.title)
