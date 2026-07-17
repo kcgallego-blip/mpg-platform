@@ -68,7 +68,9 @@ export function getStatsWeekRangeDates(
 }
 
 export function getStatsWeekRangeLabel(week: number, range: number, referenceDate = new Date()): string {
-  const { startDate, endDate } = getStatsWeekRangeDates(week, range, referenceDate)
+  const safeWeek = Math.max(1, Math.floor(week) || 1)
+  const safeRange = Math.max(1, Math.min(7, Math.floor(range) || getStatsWeekRange(referenceDate)))
+  const { startDate, endDate } = getStatsWeekRangeDates(safeWeek, safeRange, referenceDate)
 
   const monthDayFormatter = new Intl.DateTimeFormat('en-PH', {
     month: 'short',

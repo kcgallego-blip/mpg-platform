@@ -12,8 +12,8 @@ import {
   Upload,
 } from 'lucide-react'
 import {
+  getStatsMonthName,
   getStatsMonthOptions,
-  getStatsPeriodLabel,
   getStatsWeekNumber,
   getStatsWeekRange,
   getStatsWeekRangeLabel,
@@ -148,16 +148,18 @@ export default function StatsPage() {
   const [supervisors, setSupervisors] = useState<string[]>([])
   const [sortConfig, setSortConfig] = useState<SortConfig>({ field: 'name', order: 'asc' })
   const [userRole, setUserRole] = useState<string | null>(null)
-  const isAgentView = false
+  const isAgentView = userRole?.toLowerCase() === 'agent'
   const [selectedWeek, setSelectedWeek] = useState(() => getStatsWeekNumber())
   const [selectedMonth, setSelectedMonth] = useState(() => new Date().getMonth() + 1)
   const [periodType, setPeriodType] = useState<'weekly' | 'monthly'>('weekly')
   const [displayedRange, setDisplayedRange] = useState(() => getStatsWeekRange())
 
-  const displayedDateRange = useMemo(
-    () => getStatsPeriodLabel(periodType, periodType === 'monthly' ? selectedMonth : selectedWeek),
-    [periodType, selectedMonth, selectedWeek]
-  )
+  const displayedDateRange = useMemo(() => {
+    if (periodType === 'monthly') {
+      return getStatsMonthName(selectedMonth)
+    }
+    return getStatsWeekRangeLabel(selectedWeek, displayedRange)
+  }, [periodType, selectedMonth, selectedWeek, displayedRange])
 
   const periodOptions = useMemo(() => {
     if (periodType === 'monthly') {
@@ -211,8 +213,12 @@ export default function StatsPage() {
       if (data.periodType) {
         setPeriodType(data.periodType)
       }
-      if (data.periodValue && data.periodType === 'monthly') {
-        setSelectedMonth(Number(data.periodValue))
+      if (data.periodValue) {
+        if (data.periodType === 'monthly') {
+          setSelectedMonth(Number(data.periodValue))
+        } else {
+          setSelectedWeek(Number(data.periodValue))
+        }
       }
     } catch (err: any) {
       setError(err.message || 'Failed to load stats')
@@ -225,6 +231,15 @@ export default function StatsPage() {
   useEffect(() => {
     loadStats()
   }, [loadStats])
+
+  useEffect(() => {
+    if (periodType === 'weekly' && periodOptions.length > 0) {
+      const maxWeek = Math.max(...periodOptions)
+      if (selectedWeek > maxWeek) {
+        setSelectedWeek(maxWeek)
+      }
+    }
+  }, [periodType, periodOptions, selectedWeek])
 
   const handleSort = (field: string) => {
     setSortConfig(prevConfig => ({
@@ -475,8 +490,13 @@ export default function StatsPage() {
                   id="statsPeriod"
                   type="number"
                   min="1"
+                  max={periodOptions.length > 0 ? Math.max(...periodOptions) : undefined}
                   value={selectedWeek}
-                  onChange={e => setSelectedWeek(Number(e.target.value))}
+                  onChange={e => {
+                    const week = Number(e.target.value)
+                    const validWeek = Math.max(1, Math.min(week, periodOptions.length > 0 ? Math.max(...periodOptions) : week))
+                    setSelectedWeek(validWeek)
+                  }}
                   className="w-full rounded-lg border border-outline bg-surface px-4 py-2.5 text-on-surface outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
                 />
               )}
@@ -502,10 +522,10 @@ export default function StatsPage() {
           <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div>
               <p className="text-label-md font-semibold uppercase text-primary-container">
-                Viewing Week
+                Viewing {periodType === 'monthly' ? 'Month' : 'Week'}
               </p>
               <h2 className="mt-1 font-hanken text-headline-md font-bold text-on-surface">
-                Week {selectedWeek}
+                {periodType === 'monthly' ? periodLabel : `Week ${selectedWeek}`}
               </h2>
               <p className="mt-1 text-sm text-on-surface-variant">
                 {displayedDateRange}

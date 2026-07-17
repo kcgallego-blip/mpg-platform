@@ -154,21 +154,26 @@ export async function GET(request: NextRequest) {
 
     const statsForWeek = rawStats || []
 
+    // Filter by agent name for agent users using fuzzy matching
+    const agentStats = userRole.toLowerCase() === 'agent'
+      ? statsForWeek.filter(stat => getFuzzyNameScore(stat.name, userName) >= FUZZY_NAME_MATCH_THRESHOLD)
+      : statsForWeek
+
     const selectedRange = isMonthly
       ? 1
-      : statsForWeek.length > 0
-        ? Math.max(...statsForWeek.map(stat => stat.range))
+      : agentStats.length > 0
+        ? Math.max(...agentStats.map(stat => stat.range))
         : getStatsWeekRange()
 
     const stats = isMonthly
-      ? statsForWeek
-      : statsForWeek.filter(stat => stat.range === selectedRange)
+      ? agentStats
+      : agentStats.filter(stat => stat.range === selectedRange)
 
     // If team leader/supervisor, also return list of unique supervisors for filtering
     let supervisors: string[] = []
     if (userRole.toLowerCase() !== 'agent') {
       const uniqueSupervisors = Array.from(
-        new Set(statsForWeek.map(stat => stat.supervisor).filter(Boolean))
+        new Set(agentStats.map(stat => stat.supervisor).filter(Boolean))
       )
       supervisors = uniqueSupervisors
     }
