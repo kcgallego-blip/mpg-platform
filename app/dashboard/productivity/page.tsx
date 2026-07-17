@@ -190,7 +190,7 @@ const getDurationTphAverage = (statusCounts: Record<string, number>, durationMs:
 }
 
 const getHeatMapColor = (count: number) => {
-  if (count === 0) return 'rgba(0,0,0,0)'
+  if (count === 0) return 'rgba(120, 120, 120, 0.2)'
   if (count <= 1) return '#ef4444'
   if (count >= 6) return '#16a34a'
   
@@ -210,7 +210,7 @@ const CompactHourlyStrip = ({
   const [hoveredHour, setHoveredHour] = useState<string | null>(null)
 
   return (
-    <div className="flex items-end gap-1">
+    <div className="flex items-end justify-center gap-2 overflow-visible">
       {hourSlots.map((hour) => {
         const count = values[hour.key] || 0
         const backgroundColor = getHeatMapColor(count)
@@ -219,7 +219,7 @@ const CompactHourlyStrip = ({
         return (
           <div
             key={hour.key}
-            className="h-3 w-2 rounded-sm relative"
+            className="h-4 w-3 rounded-sm relative"
             style={{ backgroundColor }}
             onMouseEnter={() => setHoveredHour(hour.key)}
             onMouseLeave={() => setHoveredHour(null)}
@@ -253,7 +253,6 @@ export default function ProductivityPage() {
   const [error, setError] = useState('')
   const [sortedAgentSummaries, setSortedAgentSummaries] = useState<SortedAgentSummary[]>([])
   const [selectedAgentEmail, setSelectedAgentEmail] = useState<string | null>(null)
-  const [dataTruncated, setDataTruncated] = useState(false)
 
   const currentShiftDate = useMemo(() => getDateKey(getShiftDate(new Date())), [])
   const showTphColumn = true
@@ -299,12 +298,10 @@ export default function ProductivityPage() {
           .select('shift_date, agent, tickets, hourly_tickets, created_at')
           .eq('shift_date', selectedShiftDate)
           .order('agent', { ascending: true })
-          .limit(10000)
 
         if (summaryError) throw summaryError
 
         const summaryRows = (summaryData || []) as TphSummaryRow[]
-        setDataTruncated(summaryRows.length >= 10000)
         const agentKeys = Array.from(new Set(summaryRows.map((row) => row.agent).filter(Boolean)))
         const namesByEmail = await getNamesByEmail(agentKeys)
 
@@ -335,22 +332,31 @@ export default function ProductivityPage() {
 
       let tphQuery = supabase
         .from('tph')
-        .select('ticket_num, agent, status, shift_date, created_at', { count: 'exact' })
+        .select('ticket_num, agent, status, shift_date, created_at')
         .eq('shift_date', selectedShiftDate)
         .order('created_at', { ascending: true })
-        .limit(10000)
 
       if (selectedStatus !== 'All') {
         tphQuery = tphQuery.ilike('status', selectedStatus)
       }
 
-      const { data: tphData, count: tphCount, error: tphError } = await tphQuery
+      const TPH_PAGE_SIZE = 1000
+      const allTphData: TphTicket[] = []
 
-      if (tphError) throw tphError
+      for (let start = 0; ; start += TPH_PAGE_SIZE) {
+        const { data: tphData, error: tphError } = await tphQuery.range(start, start + TPH_PAGE_SIZE - 1)
 
-      const nextTickets = (tphData || []) as TphTicket[]
-      const nextDataTruncated = (tphCount || 0) >= 10000
-      setDataTruncated(nextDataTruncated)
+        if (tphError) throw tphError
+
+        const pageRows = (tphData || []) as TphTicket[]
+        allTphData.push(...pageRows)
+
+        if (!pageRows || pageRows.length < TPH_PAGE_SIZE) {
+          break
+        }
+      }
+
+      const nextTickets = allTphData
       const emails = Array.from(
         new Set(nextTickets.map((ticket) => ticket.agent).filter((email): email is string => !!email))
       )
@@ -428,7 +434,6 @@ export default function ProductivityPage() {
 
   useEffect(() => {
     setSortedAgentSummaries([])
-    setDataTruncated(false)
   }, [selectedShiftDate, selectedStatus])
 
   const sortProductivity = useCallback(async () => {
@@ -553,220 +558,213 @@ export default function ProductivityPage() {
   return (
     <>
       <div className="space-y-6 pb-8">
-      <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-        <div>
-          <p className="text-label-md font-semibold uppercase text-primary-container">
-            Dashboard
-          </p>
-          <h1 className="font-hanken text-headline-lg font-bold text-on-surface">
-            Productivity
-          </h1>
-          <p className="mt-2 max-w-3xl text-on-surface-variant">
-            Ticket counts from {sourceLabel} for {formatDateKey(selectedShiftDate)}. Current shift date is {formatDateKey(currentShiftDate)}.
-            {sortedAgentSummaries.length > 0 && ' Sorted by lowest ticket count, then longest duration.'}
-            {dataSource === 'tph_summary' && selectedStatus !== 'All' && view === 'hour' && ' Hourly summary rows are all-status totals.'}
-          </p>
-          {dataTruncated && (
-            <p className="mt-1 text-sm font-medium text-error">
-              Warning: Data may be truncated (over 10000 rows). Select a narrower date or status filter.
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+          <div>
+            <p className="text-label-md font-semibold uppercase text-primary-container">
+              Dashboard
             </p>
-          )}
-          {error && (
-            <p className="mt-2 text-sm font-medium text-error">{error}</p>
-          )}
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3">
-          <label className="flex min-h-11 items-center gap-2 rounded-lg border border-outline-variant bg-surface px-4 py-2 text-sm font-semibold text-on-surface shadow-sm transition hover:border-primary-container">
-            <CalendarDays size={18} className="text-primary-container" />
-            <span>Shift Date</span>
-            <input
-              type="date"
-              value={selectedShiftDate}
-              onChange={(event) => {
-                if (event.target.value) {
-                  setSelectedShiftDate(event.target.value)
-                }
-              }}
-              className="h-7 rounded border-none bg-transparent text-sm font-semibold text-on-surface outline-none"
-              aria-label="Select shift date"
-            />
-          </label>
-
-          <label className="flex min-h-11 items-center gap-2 rounded-lg border border-outline-variant bg-surface px-4 py-2 text-sm font-semibold text-on-surface shadow-sm transition hover:border-primary-container">
-            <span>Status</span>
-            <select
-              value={selectedStatus}
-              onChange={(event) => setSelectedStatus(event.target.value)}
-              className="h-7 rounded border-none bg-transparent text-sm font-semibold text-on-surface outline-none"
-              aria-label="Filter by status"
-            >
-              {STATUS_FILTERS.map((status) => (
-                <option key={status} value={status}>
-                  {status}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <div className="flex rounded-lg border border-outline-variant bg-surface p-1 shadow-sm">
-            <button
-              type="button"
-              onClick={() => setView('status')}
-              className={`flex min-h-9 items-center gap-2 rounded-md px-3 text-sm font-bold transition ${
-                view === 'status' ? 'bg-primary-container text-on-primary-container' : 'text-on-surface-variant hover:bg-surface-container-high'
-              }`}
-            >
-              <Table2 size={16} />
-              Status
-            </button>
-            <button
-              type="button"
-              onClick={() => setView('hour')}
-              className={`flex min-h-9 items-center gap-2 rounded-md px-3 text-sm font-bold transition ${
-                view === 'hour' ? 'bg-primary-container text-on-primary-container' : 'text-on-surface-variant hover:bg-surface-container-high'
-              }`}
-            >
-              <Clock3 size={16} />
-              Hour
-            </button>
+            <h1 className="font-hanken text-headline-lg font-bold text-on-surface">
+              Productivity
+            </h1>
+            <p className="mt-2 max-w-3xl text-on-surface-variant">
+              Ticket counts from {sourceLabel} for {formatDateKey(selectedShiftDate)}. Current shift date is {formatDateKey(currentShiftDate)}.
+              {sortedAgentSummaries.length > 0 && ' Sorted by lowest ticket count, then longest duration.'}
+              {dataSource === 'tph_summary' && selectedStatus !== 'All' && view === 'hour' && ' Hourly summary rows are all-status totals.'}
+            </p>
+            {error && (
+              <p className="mt-2 text-sm font-medium text-error">{error}</p>
+            )}
           </div>
 
-          <button
-            type="button"
-            onClick={() => loadProductivity(false)}
-            disabled={isRefreshing}
-            className="flex min-h-11 items-center gap-2 rounded-lg bg-primary-container px-4 py-2 text-sm font-bold text-on-primary-container shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-70"
-          >
-            <RefreshCw size={18} className={isRefreshing ? 'animate-spin' : ''} />
-            Refresh
-          </button>
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex min-h-11 items-center gap-2 rounded-lg border border-outline-variant bg-surface px-4 py-2 text-sm font-semibold text-on-surface shadow-sm transition hover:border-primary-container">
+              <CalendarDays size={18} className="text-primary-container" />
+              <span>Shift Date</span>
+              <input
+                type="date"
+                value={selectedShiftDate}
+                onChange={(event) => {
+                  if (event.target.value) {
+                    setSelectedShiftDate(event.target.value)
+                  }
+                }}
+                className="h-7 rounded border-none bg-transparent text-sm font-semibold text-on-surface outline-none"
+                aria-label="Select shift date"
+              />
+            </label>
 
-          <button
-            type="button"
-            onClick={sortProductivity}
-            disabled={isSorting}
-            className="flex min-h-11 items-center gap-2 rounded-lg border border-primary-container bg-surface px-4 py-2 text-sm font-bold text-primary-container shadow-sm transition hover:bg-primary-container/10 disabled:cursor-not-allowed disabled:opacity-70"
-          >
-            <ArrowDownUp size={18} className={isSorting ? 'animate-pulse' : ''} />
-            Sort
-          </button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        <div className="rounded-lg border border-outline-variant/60 bg-surface/90 p-4">
-          <p className="text-label-md font-semibold uppercase text-on-surface-variant">Agents</p>
-          <p className="mt-2 font-hanken text-headline-md font-bold text-on-surface">{displayedProductivityRows.length}</p>
-        </div>
-        <div className="rounded-lg border border-outline-variant/60 bg-surface/90 p-4">
-          <p className="text-label-md font-semibold uppercase text-on-surface-variant">Tickets</p>
-          <p className="mt-2 font-hanken text-headline-md font-bold text-on-surface">{totals.tickets}</p>
-        </div>
-        <div className="rounded-lg border border-outline-variant/60 bg-surface/90 p-4">
-          <p className="text-label-md font-semibold uppercase text-on-surface-variant">View</p>
-          <p className="mt-2 flex items-center gap-2 font-hanken text-headline-md font-bold text-on-surface">
-            <BarChart3 size={24} className="text-primary-container" />
-            {view === 'status' ? 'Per Status' : 'Per Hour'}
-          </p>
-        </div>
-      </div>
-
-      <section className="overflow-hidden rounded-lg border border-outline-variant/60 bg-surface/95 shadow-sm">
-        <div className="overflow-x-auto">
-          {view === 'status' ? (
-            <table className="min-w-full divide-y divide-outline-variant/60">
-              <thead className="bg-surface-container/80">
-                <tr>
-                  <th className="px-4 py-3 text-left text-label-md font-bold uppercase text-on-surface-variant">Agent</th>
-                  {STATUS_COLUMNS.map((status) => (
-                    <th key={status} className="px-4 py-3 text-center text-label-md font-bold uppercase text-on-surface-variant">
-                      {status}
-                    </th>
-                  ))}
-                  <th className="px-4 py-3 text-center text-label-md font-bold uppercase text-on-surface-variant">Total</th>
-                  {showTphColumn && (
-                    <th className="px-4 py-3 text-center text-label-md font-bold uppercase text-on-surface-variant">TPH</th>
-                  )}
-                  <th className="px-4 py-3 text-center text-label-md font-bold uppercase text-on-surface-variant">Duration</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-outline-variant/50">
-                {displayedProductivityRows.map((row) => (
-                  <tr key={row.email} className="cursor-pointer hover:bg-surface-container/60 transition" onClick={() => setSelectedAgentEmail(row.email)}>
-                    <td className="min-w-64 px-4 py-3">
-                      <p className="font-semibold text-on-surface">{row.name}</p>
-                      <p className="text-xs text-on-surface-variant">{row.email}</p>
-                    </td>
-                    {STATUS_COLUMNS.map((status) => (
-                      <td key={status} className="px-4 py-3 text-center text-sm font-semibold text-on-surface">
-                        {row.statusCounts[status] || 0}
-                      </td>
-                    ))}
-                    <td className="px-4 py-3 text-center text-sm font-bold text-primary-container">{row.total}</td>
-                    {showTphColumn && (
-                      <td className="px-4 py-3 text-center text-sm font-semibold text-on-surface">{row.tphAverage.toFixed(2)}</td>
-                    )}
-                    <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">{row.shiftDuration}</td>
-                  </tr>
+            <label className="flex min-h-11 items-center gap-2 rounded-lg border border-outline-variant bg-surface px-4 py-2 text-sm font-semibold text-on-surface shadow-sm transition hover:border-primary-container">
+              <span>Status</span>
+              <select
+                value={selectedStatus}
+                onChange={(event) => setSelectedStatus(event.target.value)}
+                className="h-7 rounded border-none bg-transparent text-sm font-semibold text-on-surface outline-none"
+                aria-label="Filter by status"
+              >
+                {STATUS_FILTERS.map((status) => (
+                  <option key={status} value={status}>
+                    {status}
+                  </option>
                 ))}
-                {displayedProductivityRows.length > 0 && (
-                  <tr className="bg-surface-container/70">
-                    <td className="px-4 py-3 font-bold text-on-surface">Total</td>
+              </select>
+            </label>
+
+            <div className="flex rounded-lg border border-outline-variant bg-surface p-1 shadow-sm">
+              <button
+                type="button"
+                onClick={() => setView('status')}
+                className={`flex min-h-9 items-center gap-2 rounded-md px-3 text-sm font-bold transition ${
+                  view === 'status' ? 'bg-primary-container text-on-primary-container' : 'text-on-surface-variant hover:bg-surface-container-high'
+                }`}
+              >
+                <Table2 size={16} />
+                Status
+              </button>
+              <button
+                type="button"
+                onClick={() => setView('hour')}
+                className={`flex min-h-9 items-center gap-2 rounded-md px-3 text-sm font-bold transition ${
+                  view === 'hour' ? 'bg-primary-container text-on-primary-container' : 'text-on-surface-variant hover:bg-surface-container-high'
+                }`}
+              >
+                <Clock3 size={16} />
+                Hour
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => loadProductivity(false)}
+              disabled={isRefreshing}
+              className="flex min-h-11 items-center gap-2 rounded-lg bg-primary-container px-4 py-2 text-sm font-bold text-on-primary-container shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              <RefreshCw size={18} className={isRefreshing ? 'animate-spin' : ''} />
+              Refresh
+            </button>
+
+            <button
+              type="button"
+              onClick={sortProductivity}
+              disabled={isSorting}
+              className="flex min-h-11 items-center gap-2 rounded-lg border border-primary-container bg-surface px-4 py-2 text-sm font-bold text-primary-container shadow-sm transition hover:bg-primary-container/10 disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              <ArrowDownUp size={18} className={isSorting ? 'animate-pulse' : ''} />
+              Sort
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <div className="rounded-lg border border-outline-variant/60 bg-surface/90 p-4">
+            <p className="text-label-md font-semibold uppercase text-on-surface-variant">Agents</p>
+            <p className="mt-2 font-hanken text-headline-md font-bold text-on-surface">{displayedProductivityRows.length}</p>
+          </div>
+          <div className="rounded-lg border border-outline-variant/60 bg-surface/90 p-4">
+            <p className="text-label-md font-semibold uppercase text-on-surface-variant">Tickets</p>
+            <p className="mt-2 font-hanken text-headline-md font-bold text-on-surface">{totals.tickets}</p>
+          </div>
+          <div className="rounded-lg border border-outline-variant/60 bg-surface/90 p-4">
+            <p className="text-label-md font-semibold uppercase text-on-surface-variant">View</p>
+            <p className="mt-2 flex items-center gap-2 font-hanken text-headline-md font-bold text-on-surface">
+              <BarChart3 size={24} className="text-primary-container" />
+              {view === 'status' ? 'Per Status' : 'Per Hour'}
+            </p>
+          </div>
+        </div>
+
+        <section className="rounded-lg border border-outline-variant/60 bg-surface/95 shadow-sm">
+          <div className={view === 'status' ? 'overflow-x-auto' : 'overflow-visible'}>
+            {view === 'status' ? (
+              <table className="min-w-full divide-y divide-outline-variant/60">
+                <thead className="bg-surface-container/80">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-label-md font-bold uppercase text-on-surface-variant">Agent</th>
                     {STATUS_COLUMNS.map((status) => (
-                      <td key={status} className="px-4 py-3 text-center text-sm font-bold text-on-surface">
-                        {totals.statusCounts[status] || 0}
-                      </td>
+                      <th key={status} className="px-4 py-3 text-center text-label-md font-bold uppercase text-on-surface-variant">
+                        {status}
+                      </th>
                     ))}
-                    <td className="px-4 py-3 text-center text-sm font-bold text-primary-container">{totals.tickets}</td>
+                    <th className="px-4 py-3 text-center text-label-md font-bold uppercase text-on-surface-variant">Total</th>
                     {showTphColumn && (
-                      <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">{totals.tphAverage.toFixed(2)}</td>
+                      <th className="px-4 py-3 text-center text-label-md font-bold uppercase text-on-surface-variant">TPH</th>
                     )}
-                    <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">-</td>
+                    <th className="px-4 py-3 text-center text-label-md font-bold uppercase text-on-surface-variant">Duration</th>
                   </tr>
-                )}
-              </tbody>
-            </table>
-          ) : (
-            <div className="space-y-2 p-4">
-              <div className="rounded-lg border border-outline-variant/60 bg-surface-container/40 p-3">
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-label-md font-semibold uppercase text-on-surface-variant">Hourly Distribution</p>
-                    <p className="text-sm text-on-surface-variant">Compact hourly activity for each agent.</p>
-                  </div>
-                  <div className="rounded-full border border-outline-variant/60 bg-surface px-3 py-1 text-sm font-semibold text-on-surface">
-                    Max: {maxHourlyBarValue}
-                  </div>
-                </div>
-                {displayedProductivityRows.map((row) => (
-                  <div key={row.email} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-outline-variant/60 bg-surface px-3 py-2">
-<div className="min-w-0 flex-1">
-                      <p className="truncate font-semibold text-on-surface">{row.name}</p>
-                      <p className="truncate text-xs text-on-surface-variant">{row.email}</p>
+                </thead>
+                <tbody className="divide-y divide-outline-variant/50">
+                  {displayedProductivityRows.map((row) => (
+                    <tr key={row.email} className="cursor-pointer hover:bg-surface-container/60 transition" onClick={() => setSelectedAgentEmail(row.email)}>
+                      <td className="min-w-64 px-4 py-3">
+                        <p className="font-semibold text-on-surface">{row.name}</p>
+                        <p className="text-xs text-on-surface-variant">{row.email}</p>
+                      </td>
+                      {STATUS_COLUMNS.map((status) => (
+                        <td key={status} className="px-4 py-3 text-center text-sm font-semibold text-on-surface">
+                          {row.statusCounts[status] || 0}
+                        </td>
+                      ))}
+                      <td className="px-4 py-3 text-center text-sm font-bold text-primary-container">{row.total}</td>
+                      {showTphColumn && (
+                        <td className="px-4 py-3 text-center text-sm font-semibold text-on-surface">{row.tphAverage.toFixed(2)}</td>
+                      )}
+                      <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">{row.shiftDuration}</td>
+                    </tr>
+                  ))}
+                  {displayedProductivityRows.length > 0 && (
+                    <tr className="bg-surface-container/70">
+                      <td className="px-4 py-3 font-bold text-on-surface">Total</td>
+                      {STATUS_COLUMNS.map((status) => (
+                        <td key={status} className="px-4 py-3 text-center text-sm font-bold text-on-surface">
+                          {totals.statusCounts[status] || 0}
+                        </td>
+                      ))}
+                      <td className="px-4 py-3 text-center text-sm font-bold text-primary-container">{totals.tickets}</td>
+                      {showTphColumn && (
+                        <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">{totals.tphAverage.toFixed(2)}</td>
+                      )}
+                      <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">-</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            ) : (
+              <div className="space-y-2 p-4">
+                <div className="rounded-lg border border-outline-variant/60 bg-surface-container/40 p-3 overflow-visible">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-label-md font-semibold uppercase text-on-surface-variant">Hourly Distribution</p>
+                      <p className="text-sm text-on-surface-variant">Compact hourly activity for each agent.</p>
                     </div>
-                    <div className="flex flex-1 items-center gap-2 min-w-0">
-                      <div className="overflow-x-auto min-w-max">
+                    <div className="rounded-full border border-outline-variant/60 bg-surface px-3 py-1 text-sm font-semibold text-on-surface">
+                      Max: {maxHourlyBarValue}
+                    </div>
+                  </div>
+                  {displayedProductivityRows.map((row) => (
+                    <div key={row.email} className="flex items-center gap-4 rounded-lg border border-outline-variant/60 bg-surface px-3 py-2">
+                      <div className="w-48 flex-shrink-0">
+                        <p className="truncate font-semibold text-on-surface">{row.name}</p>
+                        <p className="truncate text-xs text-on-surface-variant">{row.email}</p>
+                      </div>
+                      <div className="flex-1 flex justify-center overflow-visible">
                         <CompactHourlyStrip values={row.hourlyCounts} maxValue={maxHourlyBarValue} />
                       </div>
-                      <div className="flex items-center gap-2 text-xs font-semibold text-on-surface-variant">
+                      <div className="flex items-center gap-2 text-xs font-semibold text-on-surface-variant shrink-0">
                         <span className="rounded-full bg-primary-container/15 px-2 py-0.5 text-primary-container">{row.total}</span>
                         {showTphColumn && <span className="rounded-full bg-surface-container-high px-2 py-0.5">TPH {row.tphAverage.toFixed(2)}</span>}
                       </div>
                     </div>
-</div>
-                ))}
+                  ))}
+                </div>
               </div>
+            )}
+          </div>
+
+          {displayedProductivityRows.length === 0 && (
+            <div className="flex min-h-48 items-center justify-center border-t border-outline-variant/60 p-6 text-center text-sm text-on-surface-variant">
+              No productivity data found for this shift date.
             </div>
           )}
-        </div>
-
-        {displayedProductivityRows.length === 0 && (
-          <div className="flex min-h-48 items-center justify-center border-t border-outline-variant/60 p-6 text-center text-sm text-on-surface-variant">
-            No productivity data found for this shift date.
-          </div>
-        )}
-      </section>
+        </section>
       </div>
 
       {selectedAgentEmail && selectedAgent && (

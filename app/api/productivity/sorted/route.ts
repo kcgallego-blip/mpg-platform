@@ -149,7 +149,6 @@ export async function GET(request: NextRequest) {
         .select('shift_date, agent, tickets, hourly_tickets, created_at')
         .eq('shift_date', shiftDate)
         .order('agent', { ascending: true })
-        .limit(10000)
 
       if (summaryError) throw summaryError
 
@@ -242,17 +241,28 @@ export async function GET(request: NextRequest) {
       .not('agent', 'is', null)
       .order('agent', { ascending: true })
       .order('ticket_num', { ascending: true })
-      .limit(10000)
 
     if (status !== 'All') {
       tphQuery = tphQuery.ilike('status', status)
     }
 
-    const { data: tphRows, error: tphError } = await tphQuery
+    const TPH_PAGE_SIZE = 1000
+    const allTphRows: TphRow[] = []
 
-    if (tphError) throw tphError
+    for (let start = 0; ; start += TPH_PAGE_SIZE) {
+      const { data: tphRows, error: tphError } = await tphQuery.range(start, start + TPH_PAGE_SIZE - 1)
 
-    const rows = (tphRows || []) as TphRow[]
+      if (tphError) throw tphError
+
+      const pageRows = (tphRows || []) as TphRow[]
+      allTphRows.push(...pageRows)
+
+      if (!pageRows || pageRows.length < TPH_PAGE_SIZE) {
+        break
+      }
+    }
+
+    const rows = allTphRows
     const summariesByEmail = new Map<string, AgentSummary>()
 
     rows.forEach((row) => {
