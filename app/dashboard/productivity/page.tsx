@@ -1,8 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { ArrowDownUp, BarChart3, CalendarDays, Clock3, Loader2, RefreshCw, ShieldAlert, Table2, X } from 'lucide-react'
+import { ArrowDownUp, BarChart3, CalendarDays, Clock3, Loader2, RefreshCw, Table2, X } from 'lucide-react'
 import { useAuthStore } from '@/lib/authStore'
 import { supabase } from '@/lib/supabase'
 import {
@@ -67,7 +66,6 @@ type SortedAgentSummary = {
   shiftDurationMs: number
 }
 
-const ALLOWED_ROLES = ['Admin', 'Supervisor', 'Operations Manager', 'Team Leader']
 const STATUS_COLUMNS = [...TPH_STATUS_DISPLAY_COLUMNS]
 const STATUS_FILTERS = ['All', ...STATUS_COLUMNS]
 
@@ -101,7 +99,7 @@ const getShiftDate = (date: Date) => {
   const phDate = getPhilippineDate(date)
   const shiftDate = new Date(phDate)
 
-  if (phDate.getHours() < 18) {
+  if (phDate.getHours() < 19) {
     shiftDate.setDate(shiftDate.getDate() - 1)
   }
 
@@ -171,18 +169,6 @@ const hourSlots = Array.from({ length: 18 }, (_, index) => {
 
 const RELEVANT_TPH_STATUSES = ['Pending', 'On-Hold', 'Solved'] as const
 
-const normalizeRole = (role?: string | null) =>
-  (role || '')
-    .toLowerCase()
-    .replace(/[^a-z]+/g, '')
-    .trim()
-
-const isTeamLeaderRole = (role?: string | null) => normalizeRole(role) === 'teamleader'
-const isAllowedRole = (role?: string | null) => {
-  const normalizedRole = normalizeRole(role)
-  return ALLOWED_ROLES.some((allowed) => normalizeRole(allowed) === normalizedRole)
-}
-
 const getRelevantTphTicketTotal = (statusCounts: Record<string, number>) =>
   RELEVANT_TPH_STATUSES.reduce((total, status) => {
     return total + (statusCounts[status] || 0)
@@ -203,6 +189,17 @@ const getDurationTphAverage = (statusCounts: Record<string, number>, durationMs:
   return adjustedDurationHours > 0 ? getRelevantTphTicketTotal(statusCounts) / adjustedDurationHours : 0
 }
 
+const getHeatMapColor = (count: number) => {
+  if (count === 0) return 'rgba(0,0,0,0)'
+  if (count <= 1) return '#ef4444'
+  if (count >= 6) return '#16a34a'
+  
+  const t = (count - 1) / 5
+  const r = Math.round(239 - t * 209)
+  const g = Math.round(68 + t * 167)
+  return `rgb(${r}, ${g}, 68)`
+}
+
 const CompactHourlyStrip = ({
   values,
   maxValue,
@@ -210,21 +207,32 @@ const CompactHourlyStrip = ({
   values: Record<string, number>
   maxValue: number
 }) => {
-  const safeMax = Math.max(maxValue, 1)
+  const [hoveredHour, setHoveredHour] = useState<string | null>(null)
 
   return (
     <div className="flex items-end gap-1">
       {hourSlots.map((hour) => {
         const count = values[hour.key] || 0
-        const opacity = count > 0 ? 0.2 + Math.min(0.8, count / safeMax) : 0.1
+        const backgroundColor = getHeatMapColor(count)
+        const isHovered = hoveredHour === hour.key
 
         return (
           <div
             key={hour.key}
-            className="h-3 w-2 rounded-sm bg-primary-container/80"
-            style={{ opacity }}
-            title={`${hour.label}: ${count}`}
-          />
+            className="h-3 w-2 rounded-sm relative"
+            style={{ backgroundColor }}
+            onMouseEnter={() => setHoveredHour(hour.key)}
+            onMouseLeave={() => setHoveredHour(null)}
+          >
+            <div
+              className={`absolute bottom-full mb-2 left-1/2 -translate-x-1/2 px-2 py-1 text-xs font-semibold rounded-md bg-surface-container-high border border-outline-variant/60 text-on-surface whitespace-nowrap pointer-events-none transition-all duration-200 ease-out ${
+                isHovered ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-1 scale-95'
+              }`}
+              style={{ zIndex: 50 }}
+            >
+              <span className="capitalize">{hour.label}</span>: {count} ticket{count !== 1 ? 's' : ''}
+            </div>
+          </div>
         )
       })}
     </div>
@@ -232,7 +240,6 @@ const CompactHourlyStrip = ({
 }
 
 export default function ProductivityPage() {
-  const router = useRouter()
   const { user } = useAuthStore()
   const [tickets, setTickets] = useState<TphTicket[]>([])
   const [productivityRows, setProductivityRows] = useState<AgentProductivity[]>([])
@@ -246,41 +253,16 @@ export default function ProductivityPage() {
   const [error, setError] = useState('')
   const [sortedAgentSummaries, setSortedAgentSummaries] = useState<SortedAgentSummary[]>([])
   const [selectedAgentEmail, setSelectedAgentEmail] = useState<string | null>(null)
+  const [dataTruncated, setDataTruncated] = useState(false)
 
   const currentShiftDate = useMemo(() => getDateKey(getShiftDate(new Date())), [])
-  const isAllowed = isAllowedRole(user?.role)
-  const isTeamLeader = isTeamLeaderRole(user?.role)
-  const showTphColumn = isAllowed
-
-  useEffect(() => {
-    if (user?.role && !isAllowed) {
-      router.replace('/dashboard')
-    }
-  }, [isAllowed, router, user?.role])
+  const showTphColumn = true
 
   const getVisibleRowsForRole = useCallback(async (
     rows: AgentProductivity[],
-    rowNames: Record<string, string>
-  ) => {
-    if (!isTeamLeader) return rows
-
-    const teamLeaderName = user?.name || ''
-    const { data: teamAgents, error: teamError } = await supabase
-      .from('agents')
-      .select('name')
-      .eq('team_leader', teamLeaderName)
-
-    if (teamError) throw teamError
-
-    const teamNames = new Set(
-      ((teamAgents || []) as TeamAgentRow[]).map((agent) => normalizeNameForMatch(agent.name))
-    )
-
-    return rows.filter((row) => {
-      const rowName = rowNames[row.email] || row.name
-      return teamNames.has(normalizeNameForMatch(rowName)) || teamNames.has(normalizeNameForMatch(row.email))
-    })
-  }, [user?.name, user?.role])
+    _rowNames: Record<string, string>
+  ) => rows,
+  [])
 
   const getNamesByEmail = useCallback(async (emails: string[]) => {
     if (emails.length === 0) return {}
@@ -299,12 +281,6 @@ export default function ProductivityPage() {
   }, [])
 
   const loadProductivity = useCallback(async (showFullLoader = false) => {
-    if (!isAllowed) {
-      setIsLoading(false)
-      setIsRefreshing(false)
-      return
-    }
-
     try {
       if (showFullLoader) {
         setIsLoading(true)
@@ -323,10 +299,12 @@ export default function ProductivityPage() {
           .select('shift_date, agent, tickets, hourly_tickets, created_at')
           .eq('shift_date', selectedShiftDate)
           .order('agent', { ascending: true })
+          .limit(10000)
 
         if (summaryError) throw summaryError
 
         const summaryRows = (summaryData || []) as TphSummaryRow[]
+        setDataTruncated(summaryRows.length >= 10000)
         const agentKeys = Array.from(new Set(summaryRows.map((row) => row.agent).filter(Boolean)))
         const namesByEmail = await getNamesByEmail(agentKeys)
 
@@ -357,19 +335,22 @@ export default function ProductivityPage() {
 
       let tphQuery = supabase
         .from('tph')
-        .select('ticket_num, agent, status, shift_date, created_at')
+        .select('ticket_num, agent, status, shift_date, created_at', { count: 'exact' })
         .eq('shift_date', selectedShiftDate)
         .order('created_at', { ascending: true })
+        .limit(10000)
 
       if (selectedStatus !== 'All') {
         tphQuery = tphQuery.ilike('status', selectedStatus)
       }
 
-      const { data: tphData, error: tphError } = await tphQuery
+      const { data: tphData, count: tphCount, error: tphError } = await tphQuery
 
       if (tphError) throw tphError
 
       const nextTickets = (tphData || []) as TphTicket[]
+      const nextDataTruncated = (tphCount || 0) >= 10000
+      setDataTruncated(nextDataTruncated)
       const emails = Array.from(
         new Set(nextTickets.map((ticket) => ticket.agent).filter((email): email is string => !!email))
       )
@@ -439,7 +420,7 @@ export default function ProductivityPage() {
       setIsLoading(false)
       setIsRefreshing(false)
     }
-  }, [currentShiftDate, getNamesByEmail, getVisibleRowsForRole, isAllowed, selectedShiftDate, selectedStatus])
+  }, [currentShiftDate, getNamesByEmail, getVisibleRowsForRole, selectedShiftDate, selectedStatus])
 
   useEffect(() => {
     loadProductivity(true)
@@ -447,6 +428,7 @@ export default function ProductivityPage() {
 
   useEffect(() => {
     setSortedAgentSummaries([])
+    setDataTruncated(false)
   }, [selectedShiftDate, selectedStatus])
 
   const sortProductivity = useCallback(async () => {
@@ -554,17 +536,6 @@ export default function ProductivityPage() {
     return Math.max(1, ...rowValues)
   }, [displayedProductivityRows])
 
-  if (!isAllowed) {
-    return (
-      <div className="flex min-h-[400px] items-center justify-center rounded-lg border border-outline-variant/60 bg-surface/80 p-6">
-        <div className="text-center">
-          <ShieldAlert size={40} className="mx-auto mb-4 text-error" />
-          <p className="font-semibold text-on-surface">Productivity is not available for this role.</p>
-        </div>
-      </div>
-    )
-  }
-
   const selectedAgent = displayedProductivityRows.find((row) => row.email === selectedAgentEmail)
   const sourceLabel = dataSource === 'tph' ? 'raw TPH rows' : 'TPH summary rows'
 
@@ -595,6 +566,11 @@ export default function ProductivityPage() {
             {sortedAgentSummaries.length > 0 && ' Sorted by lowest ticket count, then longest duration.'}
             {dataSource === 'tph_summary' && selectedStatus !== 'All' && view === 'hour' && ' Hourly summary rows are all-status totals.'}
           </p>
+          {dataTruncated && (
+            <p className="mt-1 text-sm font-medium text-error">
+              Warning: Data may be truncated (over 10000 rows). Select a narrower date or status filter.
+            </p>
+          )}
           {error && (
             <p className="mt-2 text-sm font-medium text-error">{error}</p>
           )}
@@ -765,18 +741,20 @@ export default function ProductivityPage() {
                 </div>
                 {displayedProductivityRows.map((row) => (
                   <div key={row.email} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-outline-variant/60 bg-surface px-3 py-2">
-                    <div className="min-w-0 flex-1">
+<div className="min-w-0 flex-1">
                       <p className="truncate font-semibold text-on-surface">{row.name}</p>
                       <p className="truncate text-xs text-on-surface-variant">{row.email}</p>
                     </div>
-                    <div className="flex flex-1 items-center gap-2">
-                      <CompactHourlyStrip values={row.hourlyCounts} maxValue={maxHourlyBarValue} />
+                    <div className="flex flex-1 items-center gap-2 min-w-0">
+                      <div className="overflow-x-auto min-w-max">
+                        <CompactHourlyStrip values={row.hourlyCounts} maxValue={maxHourlyBarValue} />
+                      </div>
                       <div className="flex items-center gap-2 text-xs font-semibold text-on-surface-variant">
                         <span className="rounded-full bg-primary-container/15 px-2 py-0.5 text-primary-container">{row.total}</span>
                         {showTphColumn && <span className="rounded-full bg-surface-container-high px-2 py-0.5">TPH {row.tphAverage.toFixed(2)}</span>}
                       </div>
                     </div>
-                  </div>
+</div>
                 ))}
               </div>
             </div>

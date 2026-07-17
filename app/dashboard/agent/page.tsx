@@ -65,7 +65,7 @@ const getShiftDate = (date: Date) => {
   const phDate = getPhilippineDate(date)
   const shiftDate = new Date(phDate)
 
-  if (phDate.getHours() < 18) {
+  if (phDate.getHours() < 19) {
     shiftDate.setDate(shiftDate.getDate() - 1)
   }
 
@@ -100,6 +100,17 @@ const hourSlots = Array.from({ length: 18 }, (_, index) => {
   }
 })
 
+const getHeatMapColor = (count: number) => {
+  if (count === 0) return 'rgba(0,0,0,0)'
+  if (count <= 1) return '#ef4444'
+  if (count >= 6) return '#16a34a'
+  
+  const t = (count - 1) / 5
+  const r = Math.round(239 - t * 209)
+  const g = Math.round(68 + t * 167)
+  return `rgb(${r}, ${g}, 68)`
+}
+
 const HourlyBarChart = ({
   values,
   maxValue,
@@ -108,6 +119,7 @@ const HourlyBarChart = ({
   maxValue: number
 }) => {
   const safeMax = Math.max(maxValue, 1)
+  const [hoveredHour, setHoveredHour] = useState<string | null>(null)
 
   return (
     <div className="rounded-lg border border-outline-variant/60 bg-surface-container/40 p-4">
@@ -115,14 +127,26 @@ const HourlyBarChart = ({
         {hourSlots.map((hour) => {
           const count = values[hour.key] || 0
           const heightPercent = count > 0 ? Math.max(10, Math.round((count / safeMax) * 100)) : 0
+          const backgroundColor = getHeatMapColor(count)
+          const isHovered = hoveredHour === hour.key
 
           return (
             <div key={hour.key} className="flex flex-1 flex-col items-center gap-2">
-              <div className="flex h-36 w-full items-end justify-center rounded-t-lg bg-surface/70 p-1">
+              <div className="flex h-36 w-full items-end justify-center rounded-t-lg bg-surface/70 p-1 relative">
                 <div
-                  className="w-full rounded-t-lg bg-primary-container/80"
-                  style={{ height: `${heightPercent}%` }}
+                  className="w-full rounded-t-lg"
+                  style={{ backgroundColor, height: `${heightPercent}%` }}
+                  onMouseEnter={() => setHoveredHour(hour.key)}
+                  onMouseLeave={() => setHoveredHour(null)}
                 />
+                <div
+                  className={`absolute bottom-full mb-2 left-1/2 -translate-x-1/2 px-2 py-1 text-xs font-semibold rounded-md bg-surface-container-high border border-outline-variant/60 text-on-surface whitespace-nowrap pointer-events-none transition-all duration-200 ease-out ${
+                    isHovered ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-1 scale-95'
+                  }`}
+                  style={{ zIndex: 50 }}
+                >
+                  <span className="capitalize">{hour.label}</span>: {count} ticket{count !== 1 ? 's' : ''}
+                </div>
               </div>
               <div className="text-center">
                 <p className="text-label-sm font-semibold uppercase text-on-surface-variant">{hour.label}</p>
@@ -196,6 +220,7 @@ export default function AgentDashboardPage() {
         .eq('agent', user.email)
         .eq('shift_date', selectedShiftDate)
         .order('created_at', { ascending: false })
+        .limit(10000)
 
       if (dbError) throw dbError
 

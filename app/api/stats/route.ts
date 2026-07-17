@@ -132,12 +132,6 @@ export async function GET(request: NextRequest) {
     const safeSortBy = validSortFields.includes(sortBy) ? sortBy : 'name'
     const safeOrder = sortOrder.toLowerCase() === 'desc' ? false : true
 
-    const isAgent = userRole.toLowerCase() === 'agent'
-    const isTeamLeader = userRole.toLowerCase() === 'team leader'
-    const isSupervisor = userRole.toLowerCase() === 'supervisor'
-    const isAdminOrManager = ['admin', 'manager'].includes(userRole.toLowerCase())
-    const agentNameTokens = getNameTokens(userName)
-
     // Build the base query
     let query = supabase
       .from(isMonthly ? 'stats_month' : 'stats')
@@ -149,23 +143,6 @@ export async function GET(request: NextRequest) {
       query = query.eq('week', selectedWeek)
     }
 
-    // Apply role-based filtering
-    if (isAgent) {
-      // Agents can only see stats rows that fuzzy-match their users.name value.
-      if (agentNameTokens.length > 0) {
-        const filters = agentNameTokens.map(token => `name.ilike.%${token}%`)
-        query = query.or(filters.join(','))
-      } else {
-        query = query.eq('name', userName)
-      }
-    } else if (isTeamLeader || isSupervisor) {
-      // Team leaders and supervisors can see stats of agents under them
-      query = query.eq('supervisor', dbUser.name || '')
-    } else if (isAdminOrManager && supervisorFilter && supervisorFilter !== 'all') {
-      query = query.eq('supervisor', supervisorFilter)
-    }
-    // Admin/Manager roles can see all stats when no supervisor filter is selected
-
     query = query.order(safeSortBy, { ascending: safeOrder }).order('created_at', { ascending: false })
 
     const { data: rawStats, error: statsError } = await query
@@ -175,15 +152,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to fetch stats' }, { status: 500 })
     }
 
-    const statsForWeek = isAgent
-      ? (rawStats || [])
-          .filter(stat => getFuzzyNameScore(stat.name, userName) >= FUZZY_NAME_MATCH_THRESHOLD)
-          .sort((a, b) => {
-            const scoreDiff = getFuzzyNameScore(b.name, userName) - getFuzzyNameScore(a.name, userName)
-            if (scoreDiff !== 0) return scoreDiff
-            return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-          })
-      : rawStats || []
+    const statsForWeek = rawStats || []
 
     const selectedRange = isMonthly
       ? 1

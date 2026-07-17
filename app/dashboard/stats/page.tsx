@@ -148,6 +148,7 @@ export default function StatsPage() {
   const [supervisors, setSupervisors] = useState<string[]>([])
   const [sortConfig, setSortConfig] = useState<SortConfig>({ field: 'name', order: 'asc' })
   const [userRole, setUserRole] = useState<string | null>(null)
+  const isAgentView = false
   const [selectedWeek, setSelectedWeek] = useState(() => getStatsWeekNumber())
   const [selectedMonth, setSelectedMonth] = useState(() => new Date().getMonth() + 1)
   const [periodType, setPeriodType] = useState<'weekly' | 'monthly'>('weekly')
@@ -354,12 +355,10 @@ export default function StatsPage() {
         <div>
           <p className="text-label-md font-semibold uppercase text-primary-container">Stats</p>
           <h1 className="font-hanken text-headline-lg font-bold text-on-surface">
-            {userRole?.toLowerCase() === 'agent' ? 'Your Performance' : 'Team Performance'}
+            Performance Metrics
           </h1>
           <p className="mt-2 max-w-3xl text-on-surface-variant">
-            {userRole?.toLowerCase() === 'agent'
-              ? 'View your performance metrics and KPIs.'
-              : 'View and manage agent performance metrics. Green chips indicate passing scores.'}
+            View agent performance metrics and KPIs. Green chips indicate passing scores.
           </p>
         </div>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -451,7 +450,7 @@ export default function StatsPage() {
         </div>
       )}
 
-      {userRole?.toLowerCase() !== 'agent' && (
+      {!isAgentView && (
         <div className="rounded-lg border border-outline-variant/60 bg-surface-dim p-5">
           <div className="grid gap-4 md:grid-cols-2">
             <div>
@@ -498,7 +497,7 @@ export default function StatsPage() {
         </div>
       )}
 
-      {userRole?.toLowerCase() === 'agent' && !isLoading && (
+      {isAgentView && !isLoading && (
         <div className="rounded-2xl border border-outline-variant/60 bg-surface p-5 shadow-sm">
           <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div>
@@ -550,7 +549,7 @@ export default function StatsPage() {
       )}
 
       {/* Stats Table */}
-      {userRole?.toLowerCase() === 'agent' ? (
+      {isAgentView ? (
         stats.length === 0 ? (
           <div className="flex flex-col items-center justify-center rounded-lg border border-outline-variant/60 bg-surface/70 py-16">
             <AlertCircle size={40} className="mb-4 text-on-surface-variant/40" />

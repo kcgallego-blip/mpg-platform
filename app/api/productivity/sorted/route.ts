@@ -108,7 +108,7 @@ const getShiftDate = (date: Date) => {
   const phDate = getPhilippineDate(date)
   const shiftDate = new Date(phDate)
 
-  if (phDate.getHours() < 18) {
+  if (phDate.getHours() < 19) {
     shiftDate.setDate(shiftDate.getDate() - 1)
   }
 
@@ -149,6 +149,7 @@ export async function GET(request: NextRequest) {
         .select('shift_date, agent, tickets, hourly_tickets, created_at')
         .eq('shift_date', shiftDate)
         .order('agent', { ascending: true })
+        .limit(10000)
 
       if (summaryError) throw summaryError
 
@@ -241,6 +242,7 @@ export async function GET(request: NextRequest) {
       .not('agent', 'is', null)
       .order('agent', { ascending: true })
       .order('ticket_num', { ascending: true })
+      .limit(10000)
 
     if (status !== 'All') {
       tphQuery = tphQuery.ilike('status', status)
