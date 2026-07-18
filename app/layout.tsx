@@ -1,7 +1,7 @@
 import '@/styles/globals.css'
 
 export const metadata = {
-  title: 'Masterpiece Group - Analytics Platform',
+  title: 'CLAD - Analytics Platform',
   description: 'Professional BPO Analytics & Reports Dashboard',
 }
 

@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Lock, Mail, User } from 'lucide-react'
+import { Lock, Mail, User, Eye, EyeOff } from 'lucide-react'
 import Image from 'next/image'
 import { useAuthStore } from '@/lib/authStore'
 
@@ -15,6 +15,7 @@ export default function RegisterPage() {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -53,30 +54,30 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="w-full max-w-md">
-      <div className="mb-8 text-center">
-        <div className="mb-2 flex items-center justify-center gap-2 font-hanken text-3xl font-bold text-primary-container">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-primary-container to-inverse-primary p-1">
+<div className="w-full max-w-md">
+        <div className="mb-8 text-center">
+          <div className="flex items-center justify-center gap-3 mb-2">
             <Image
-              src="/logo.png"
-              alt="MPG Logo"
-              width={28}
-              height={28}
+              src="/icon.png"
+              alt="CLAD Logo"
+              width={64}
+              height={64}
+              className="object-contain"
+            />
+            <Image
+              src="/logo-name.png"
+              alt="CLAD Platform"
+              width={200}
+              height={36}
               className="object-contain"
             />
           </div>
-          MPG
         </div>
-        <p className="text-sm text-on-surface-variant">Masterpiece Group Analytics</p>
-      </div>
 
       <div className="glass-effect rounded-2xl p-8 backdrop-blur-glass-lg">
         <h1 className="mb-2 text-center font-hanken text-headline-md font-bold text-on-surface">
           Register Account
         </h1>
-        <p className="mb-8 text-center text-sm text-on-surface-variant">
-          Submit your details for admin approval.
-        </p>
 
         {error && (
           <div className="mb-6 rounded-lg bg-error/10 p-4 text-sm text-error">
@@ -131,15 +132,22 @@ export default function RegisterPage() {
               <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant" size={18} />
               <input
                 id="password"
-                type="password"
+                type={showPassword ? 'text' : 'password'}
                 name="password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 placeholder="Insert password"
-                className="w-full rounded-DEFAULT border border-outline-variant/50 bg-surface-container-low/50 py-sm pl-10 pr-4 text-on-surface placeholder-on-surface-variant/50 transition-all focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                className="w-full rounded-DEFAULT border border-outline-variant/50 bg-surface-container-low/50 py-sm pl-10 pr-12 text-on-surface placeholder-on-surface-variant/50 transition-all focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                 required
                 minLength={8}
               />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface"
+              >
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
             </div>
           </div>
 
@@ -154,7 +162,7 @@ export default function RegisterPage() {
 
         <p className="mt-8 text-center text-sm text-on-surface-variant">
           Already registered?{' '}
-          <Link href="/login" className="font-medium text-primary transition-colors hover:text-inverse-primary">
+          <Link href="/login" className="font-medium text-secondary-container hover:underline">
             Sign in
           </Link>
         </p>

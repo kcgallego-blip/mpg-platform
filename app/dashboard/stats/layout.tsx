@@ -1,7 +1,7 @@
 import { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Stats | MPG Platform',
+  title: 'Stats | CLAD Platform',
   description: 'Agent and team performance statistics',
 }
 

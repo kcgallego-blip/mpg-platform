@@ -1,7 +1,7 @@
 import { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Upload Stats | MPG Platform',
+  title: 'Upload Stats | CLAD Platform',
   description: 'Upload agent performance statistics',
 }
 

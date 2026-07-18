@@ -106,11 +106,11 @@ export async function GET(request: NextRequest) {
         return NextResponse.redirect(new URL('/login?error=db_error', request.url))
       }
 
-      return NextResponse.redirect(new URL('/login?error=approval_required', request.url))
+      return NextResponse.redirect(new URL('/login?registered=1', request.url))
     }
 
     if (existingUser.is_active !== true) {
-      return NextResponse.redirect(new URL('/login?error=approval_required', request.url))
+      return NextResponse.redirect(new URL('/login?registered=1', request.url))
     }
 
     const sessionToken = createSessionToken()

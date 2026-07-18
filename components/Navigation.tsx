@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/lib/authStore'
 import { LogOut, User, LayoutDashboard, Ticket, FileText, ChevronDown, ChevronRight, Users, BarChart3, TrendingUp, Wrench } from 'lucide-react'
-import { useState, type ComponentType } from 'react'
+import { useState, useEffect, useRef, type ComponentType } from 'react'
 import Image from 'next/image'
 
 type IconComponent = ComponentType<any>
@@ -75,13 +75,32 @@ export default function Navigation() {
   const router = useRouter()
   const { user, logout } = useAuthStore()
   const [expandedItems, setExpandedItems] = useState<string[]>(['IT', 'Utilities'])
+  const [showLogout, setShowLogout] = useState(false)
+  const profileRef = useRef<HTMLDivElement>(null)
 
   const navItems = getNavItemsByRole(user?.role)
 
   const handleLogout = async () => {
+    setShowLogout(false)
     await logout()
     router.push('/login')
   }
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (profileRef.current && !profileRef.current.contains(event.target as Node)) {
+        setShowLogout(false)
+      }
+    }
+
+    if (showLogout) {
+      document.addEventListener('mousedown', handleClickOutside)
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [showLogout])
 
   const toggleExpand = (label: string) => {
     setExpandedItems(prev =>
@@ -96,22 +115,23 @@ export default function Navigation() {
       <header className="sticky top-0 z-50 bg-primary-container/90 backdrop-blur-glass-md border-b border-outline/20">
         <div className="max-w-container mx-auto px-gutter py-4">
           <div className="flex items-center justify-between">
-            <Link href="/dashboard" className="font-hanken text-2xl font-bold text-primary-container flex items-center gap-2">
-              <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center p-1.5">
-                <Image
-                  src="/logo.png"
-                  alt="MPG Logo"
-                  width={28}
-                  height={28}
-                  className="object-contain"
-                />
-              </div>
-              MPG
+            <Link href="/dashboard" className="flex items-center gap-3">
+              <Image
+                src="/icon.png"
+                alt="CLAD Logo"
+                width={48}
+                height={48}
+                className="object-contain"
+              />
+              <span className="font-hanken text-2xl font-bold text-white">CLAD</span>
             </Link>
 
             <div className="flex items-center gap-4">
-              <div className="relative group">
-                <button className="flex items-center gap-2 px-4 py-2 rounded-lg hover:bg-surface-container-high transition-colors">
+              <div className="relative" ref={profileRef}>
+                <button
+                  onClick={() => setShowLogout(prev => !prev)}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg hover:bg-surface-container-high transition-colors"
+                >
                   <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center overflow-hidden">
                     {user?.avatar_image ? (
                       <img
@@ -126,15 +146,17 @@ export default function Navigation() {
                   <span className="text-on-primary-container text-sm font-medium">{user?.email?.split('@')[0]}</span>
                 </button>
 
-                <div className="absolute right-0 mt-2 w-48 glass-effect rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 p-2">
-                  <button
-                    onClick={handleLogout}
-                    className="w-full flex items-center gap-3 px-4 py-2 rounded-lg text-error hover:bg-error/10 transition-colors text-sm font-medium"
-                  >
-                    <LogOut size={18} />
-                    Sign Out
-                  </button>
-                </div>
+                {showLogout && (
+                  <div className="absolute right-0 mt-2 w-48 glass-effect rounded-lg shadow-lg transition-all duration-200 p-2">
+                    <button
+                      onClick={handleLogout}
+                      className="w-full flex items-center gap-3 px-4 py-2 rounded-lg text-error hover:bg-error/10 transition-colors text-sm font-medium"
+                    >
+                      <LogOut size={18} />
+                      Sign Out
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>

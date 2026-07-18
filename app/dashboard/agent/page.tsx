@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuthStore } from '@/lib/authStore'
 import { supabase } from '@/lib/supabase'
 import { BarChart3, CalendarDays, Clock3, Gauge, Loader2, RefreshCw, Sigma, Ticket } from 'lucide-react'
@@ -172,6 +172,7 @@ export default function AgentDashboardPage() {
   const [error, setError] = useState('')
   const [selectedShiftDate, setSelectedShiftDate] = useState(() => getDateKey(getShiftDate(new Date())))
   const currentShiftDate = getDateKey(getShiftDate(new Date()))
+  const dateInputRef = useRef<HTMLInputElement>(null)
 
   const loadTickets = useCallback(async (showFullLoader = false) => {
     if (!user?.email) {
@@ -293,10 +294,17 @@ export default function AgentDashboardPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <label className="relative flex min-h-11 items-center gap-2 rounded-lg border border-outline-variant bg-surface px-4 py-2 text-sm font-semibold text-on-surface shadow-sm transition hover:border-primary-container">
-            <CalendarDays size={18} className="text-primary-container" />
-            <span>Shift Date</span>
+          <div className="relative flex items-center">
+            <button
+              type="button"
+              onClick={() => dateInputRef.current?.showPicker?.()}
+              className="flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border border-outline-variant bg-surface px-4 py-2 text-sm font-semibold text-on-surface shadow-sm transition hover:border-primary-container"
+            >
+              <CalendarDays size={18} className="text-primary-container" />
+              <span>Shift Date: {formatSelectedDate(selectedShiftDate)}</span>
+            </button>
             <input
+              ref={dateInputRef}
               type="date"
               value={selectedShiftDate}
               onChange={(event) => {
@@ -304,10 +312,10 @@ export default function AgentDashboardPage() {
                   setSelectedShiftDate(event.target.value)
                 }
               }}
-              className="h-7 rounded border-none bg-transparent text-sm font-semibold text-on-surface outline-none"
+              className="sr-only"
               aria-label="Select shift date"
             />
-          </label>
+          </div>
 
           <button
             type="button"
