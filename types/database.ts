@@ -297,6 +297,37 @@ export interface Database {
           updated_at?: string
         }
       }
+      survey: {
+        Row: {
+          survey_date: string | null
+          response_id: string
+          agent: string
+          csat: 'Unsatisfied' | 'Neutral' | 'Satisfied'
+          mod_comment: string | null
+          open_comment: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          survey_date?: string | null
+          response_id: string
+          agent: string
+          csat: 'Unsatisfied' | 'Neutral' | 'Satisfied'
+          mod_comment?: string | null
+          open_comment?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          survey_date?: string | null
+          response_id?: string
+          agent?: string
+          csat?: 'Unsatisfied' | 'Neutral' | 'Satisfied'
+          mod_comment?: string | null
+          open_comment?: string | null
+          updated_at?: string
+        }
+      }
     }
   }
 }

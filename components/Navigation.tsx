@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/lib/authStore'
-import { LogOut, User, LayoutDashboard, Ticket, FileText, ChevronDown, ChevronRight, Users, BarChart3, TrendingUp, Wrench } from 'lucide-react'
+import { LogOut, User, LayoutDashboard, Ticket, FileText, ChevronDown, ChevronRight, Users, BarChart3, TrendingUp, Wrench, MessageSquareText } from 'lucide-react'
 import { useState, useEffect, useRef, type ComponentType } from 'react'
 import Image from 'next/image'
 
@@ -12,6 +12,7 @@ type NavItem = { href: string; icon: IconComponent; label: string } | { label: s
 const allNavItems: NavItem[] = [
   { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { href: '/dashboard/stats', icon: TrendingUp, label: 'Stats' },
+  { href: '/survey', icon: MessageSquareText, label: 'Survey' },
   { href: '/dashboard/productivity', icon: BarChart3, label: 'Productivity' },
   {
     label: 'IT',
@@ -35,6 +36,7 @@ const allNavItems: NavItem[] = [
 const managerNavItems: NavItem[] = [
   { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { href: '/dashboard/stats', icon: TrendingUp, label: 'Stats' },
+  { href: '/survey', icon: MessageSquareText, label: 'Survey' },
   { href: '/dashboard/productivity', icon: BarChart3, label: 'Productivity' },
   {
     label: 'IT',
@@ -65,6 +67,7 @@ function getNavItemsByRole(role: string | null | undefined) {
       return [
         { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
         { href: '/dashboard/stats', icon: TrendingUp, label: 'Stats' },
+        { href: '/survey', icon: MessageSquareText, label: 'Survey' },
       ]
     default:
       return [{ href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' }]
