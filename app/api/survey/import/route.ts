@@ -63,6 +63,23 @@ const getHeaderValue = (row: RawSurveyRow, header: string) => {
   return foundKey ? row[foundKey] : undefined
 }
 
+const getSurveyKey = (record: { agent: string; response_id: string }) =>
+  `${record.agent.toLowerCase()}::${record.response_id.toLowerCase()}`
+
+const getDateRange = (records: Array<{ survey_date: string | null }>) => {
+  const sortedDates = records
+    .map(record => record.survey_date)
+    .filter((value): value is string => Boolean(value))
+    .sort()
+
+  return sortedDates.length > 0
+    ? {
+        earliest: sortedDates[0],
+        latest: sortedDates[sortedDates.length - 1],
+      }
+    : null
+}
+
 export async function POST(request: NextRequest) {
   try {
     const dbUser = await getAuthenticatedDbUser(request)
@@ -155,18 +172,60 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    let imported = 0
-    const insertedDateValues: string[] = []
+    const uploadUniqueRecords = []
+    const uploadSeenKeys = new Set<string>()
+    let duplicateRowsInUpload = 0
+
+    for (const record of dbRecords) {
+      const key = getSurveyKey(record)
+
+      if (uploadSeenKeys.has(key)) {
+        duplicateRowsInUpload += 1
+        continue
+      }
+
+      uploadSeenKeys.add(key)
+      uploadUniqueRecords.push(record)
+    }
+
+    const existingKeys = new Set<string>()
+    const responseIds = Array.from(new Set(uploadUniqueRecords.map(record => record.response_id)))
     const batchSize = 100
 
-    for (let i = 0; i < dbRecords.length; i += batchSize) {
-      const batch = dbRecords.slice(i, i + batchSize)
+    for (let i = 0; i < responseIds.length; i += batchSize) {
+      const responseIdBatch = responseIds.slice(i, i + batchSize)
       const { data, error } = await supabase
         .from('survey')
-        .upsert(batch, {
-          onConflict: 'agent,response_id',
-          ignoreDuplicates: true,
-        })
+        .select('agent, response_id')
+        .in('response_id', responseIdBatch)
+
+      if (error) {
+        return NextResponse.json(
+          {
+            error: `Failed to check existing survey data: ${error.message}`,
+            imported: 0,
+            skippedSatisfiedWithoutMod,
+            skippedInvalid,
+          },
+          { status: 500 }
+        )
+      }
+
+      for (const row of data || []) {
+        existingKeys.add(getSurveyKey(row))
+      }
+    }
+
+    const recordsToInsert = uploadUniqueRecords.filter(record => !existingKeys.has(getSurveyKey(record)))
+    const duplicatesSkipped = dbRecords.length - recordsToInsert.length
+    let imported = 0
+    const insertedRecords = []
+
+    for (let i = 0; i < recordsToInsert.length; i += batchSize) {
+      const batch = recordsToInsert.slice(i, i + batchSize)
+      const { data, error } = await supabase
+        .from('survey')
+        .insert(batch)
         .select('agent, response_id, survey_date')
 
       if (error) {
@@ -176,30 +235,26 @@ export async function POST(request: NextRequest) {
             imported,
             skippedSatisfiedWithoutMod,
             skippedInvalid,
+            duplicatesSkipped,
           },
           { status: 500 }
         )
       }
 
       imported += data?.length || 0
-      insertedDateValues.push(...(data || []).map(row => row.survey_date).filter(Boolean))
+      insertedRecords.push(...(data || []))
     }
-
-    const sortedInsertedDates = insertedDateValues.sort()
 
     return NextResponse.json({
       success: true,
       imported,
-      duplicatesSkipped: dbRecords.length - imported,
+      duplicatesSkipped,
+      duplicateRowsInUpload,
       skippedSatisfiedWithoutMod,
       skippedInvalid,
       eligibleRows: dbRecords.length,
-      importedDateRange: sortedInsertedDates.length > 0
-        ? {
-            earliest: sortedInsertedDates[0],
-            latest: sortedInsertedDates[sortedInsertedDates.length - 1],
-          }
-        : null,
+      eligibleDateRange: getDateRange(dbRecords),
+      importedDateRange: getDateRange(insertedRecords),
       message: `Successfully imported ${imported} survey rows`,
     })
   } catch (error: any) {

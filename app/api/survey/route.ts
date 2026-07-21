@@ -5,6 +5,8 @@ import { supabase } from '@/lib/supabase'
 const FUZZY_NAME_MATCH_THRESHOLD = 60
 const MIN_SURVEY_WEEK = 27
 const MIN_SURVEY_MONTH = 7
+const SURVEY_FETCH_BATCH_SIZE = 1000
+const SURVEY_FETCH_MAX_ROWS = 50000
 
 const normalizeNameForMatch = (value: string | null | undefined) =>
   (value || '')
@@ -176,6 +178,32 @@ const isInPeriod = (surveyDate: string | null | undefined, periodType: 'weekly' 
     : getMonthKey(date) === periodValue
 }
 
+const fetchSurveyRows = async () => {
+  const rows: any[] = []
+
+  for (let from = 0; from < SURVEY_FETCH_MAX_ROWS; from += SURVEY_FETCH_BATCH_SIZE) {
+    const to = Math.min(from + SURVEY_FETCH_BATCH_SIZE - 1, SURVEY_FETCH_MAX_ROWS - 1)
+    const { data, error } = await supabase
+      .from('survey')
+      .select('*')
+      .order('survey_date', { ascending: false, nullsFirst: false })
+      .order('created_at', { ascending: false })
+      .range(from, to)
+
+    if (error) {
+      return { rows, error }
+    }
+
+    rows.push(...(data || []))
+
+    if (!data || data.length < SURVEY_FETCH_BATCH_SIZE) {
+      break
+    }
+  }
+
+  return { rows, error: null }
+}
+
 export async function GET(request: NextRequest) {
   try {
     const dbUser = await getAuthenticatedDbUser(request)
@@ -190,11 +218,7 @@ export async function GET(request: NextRequest) {
     const periodType = parsePeriodType(request.nextUrl.searchParams.get('periodType'))
     const requestedPeriod = request.nextUrl.searchParams.get('period')
 
-    const { data: surveyRows, error } = await supabase
-      .from('survey')
-      .select('*')
-      .order('survey_date', { ascending: false, nullsFirst: false })
-      .order('created_at', { ascending: false })
+    const { rows: surveyRows, error } = await fetchSurveyRows()
 
     if (error) {
       console.error('Survey fetch error:', error)
@@ -219,6 +243,9 @@ export async function GET(request: NextRequest) {
       survey: rows,
       userRole,
       userName,
+      totalFetchedRows: surveyRows.length,
+      maxFetchedRows: SURVEY_FETCH_MAX_ROWS,
+      isFetchTruncated: surveyRows.length >= SURVEY_FETCH_MAX_ROWS,
       periodType,
       periodValue: selectedPeriod,
       periodOptions: {

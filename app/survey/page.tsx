@@ -354,6 +354,9 @@ export default function SurveyPage() {
         `Skipped ${result.duplicatesSkipped ?? 0} duplicates`,
         `Skipped ${result.skippedSatisfiedWithoutMod ?? 0} satisfied rows without MOD Comment`,
         `Skipped ${result.skippedInvalid ?? 0} invalid rows`,
+        result.eligibleDateRange
+          ? `Eligible dates ${result.eligibleDateRange.earliest} to ${result.eligibleDateRange.latest}`
+          : 'No eligible dates found',
         result.importedDateRange
           ? `Inserted dates ${result.importedDateRange.earliest} to ${result.importedDateRange.latest}`
           : 'No new dates inserted',
