@@ -1,7 +1,8 @@
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/lib/authStore'
-import { LogOut, User, LayoutDashboard, Ticket, FileText, ChevronDown, ChevronRight, Users, BarChart3, TrendingUp, Wrench, MessageSquareText } from 'lucide-react'
+import { useFeatureSettingsStore } from '@/lib/featureSettingsStore'
+import { LogOut, User, LayoutDashboard, Ticket, FileText, ChevronDown, ChevronRight, Users, BarChart3, TrendingUp, Wrench, MessageSquareText, CalendarClock, SlidersHorizontal } from 'lucide-react'
 import { useState, useEffect, useRef, type ComponentType } from 'react'
 import Image from 'next/image'
 
@@ -11,6 +12,7 @@ type NavItem = { href: string; icon: IconComponent; label: string } | { label: s
 
 const allNavItems: NavItem[] = [
   { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+  { href: '/suggestions', icon: MessageSquareText, label: 'Suggestions' },
   { href: '/dashboard/stats', icon: TrendingUp, label: 'Stats' },
   { href: '/survey', icon: MessageSquareText, label: 'Survey' },
   { href: '/dashboard/productivity', icon: BarChart3, label: 'Productivity' },
@@ -29,6 +31,7 @@ const allNavItems: NavItem[] = [
       { href: '/dashboard/utilities/ledger', icon: FileText, label: 'Ledger' },
       { href: '/dashboard/utilities/accounts', icon: Users, label: 'Accounts' },
       { href: '/dashboard/utilities/agents', icon: Users, label: 'Agents' },
+      { href: '/utilities/controls', icon: SlidersHorizontal, label: 'Controls' },
     ],
   },
 ]
@@ -48,29 +51,47 @@ const managerNavItems: NavItem[] = [
   },
 ]
 
-function getNavItemsByRole(role: string | null | undefined) {
+const agentNavItems: NavItem[] = [
+  { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+  { href: '/suggestions', icon: MessageSquareText, label: 'Suggestions' },
+  { href: '/dashboard/stats', icon: TrendingUp, label: 'Stats' },
+  { href: '/survey', icon: MessageSquareText, label: 'Survey' },
+]
+
+const attendanceNavItem: NavItem = {
+  href: '/attendance',
+  icon: CalendarClock,
+  label: 'Attendance',
+}
+
+function withAttendance(items: NavItem[], showAttendance: boolean) {
+  if (!showAttendance) return items
+  return [items[0], attendanceNavItem, ...items.slice(1)]
+}
+
+function getNavItemsByRole(
+  role: string | null | undefined,
+  showAttendance: boolean
+): NavItem[] {
   if (!role) {
     return [{ href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' }]
   }
 
   switch (role) {
     case 'Admin':
-      return allNavItems
+      return withAttendance(allNavItems, true)
     case 'IT':
     case 'Operations Manager':
     case 'Supervisor':
-      return managerNavItems
-
     case 'Team Leader':
-      return managerNavItems
+      return withAttendance(managerNavItems, showAttendance)
     case 'Agent':
-      return [
-        { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-        { href: '/dashboard/stats', icon: TrendingUp, label: 'Stats' },
-        { href: '/survey', icon: MessageSquareText, label: 'Survey' },
-      ]
+      return withAttendance(agentNavItems, showAttendance)
     default:
-      return [{ href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' }]
+      return withAttendance(
+        [{ href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' }],
+        showAttendance
+      )
   }
 }
 
@@ -80,14 +101,28 @@ export default function Navigation() {
   const [expandedItems, setExpandedItems] = useState<string[]>(['IT', 'Utilities'])
   const [showLogout, setShowLogout] = useState(false)
   const profileRef = useRef<HTMLDivElement>(null)
+  const canAccessAttendance = useFeatureSettingsStore(
+    (state) => state.canAccessAttendance
+  )
+  const settingsLoadedFor = useFeatureSettingsStore((state) => state.loadedFor)
+  const loadFeatureSettings = useFeatureSettingsStore((state) => state.load)
 
-  const navItems = getNavItemsByRole(user?.role)
+  const showAttendance =
+    user?.role === 'Admin' ||
+    (settingsLoadedFor === user?.email && canAccessAttendance)
+  const navItems = getNavItemsByRole(user?.role, showAttendance)
 
   const handleLogout = async () => {
     setShowLogout(false)
     await logout()
     router.push('/login')
   }
+
+  useEffect(() => {
+    if (user?.email) {
+      void loadFeatureSettings(user.email)
+    }
+  }, [loadFeatureSettings, user?.email])
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {

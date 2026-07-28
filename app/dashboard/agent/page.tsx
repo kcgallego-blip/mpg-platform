@@ -7,6 +7,8 @@ import { BarChart3, CalendarDays, Clock3, Gauge, Loader2, RefreshCw, Sigma, Tick
 import {
   TPH_STATUS_COLUMNS,
   TphDataSource,
+  calculateAgentMetrics,
+  calculateMetricsFromRawDuration,
   getTphDataSourceForShiftDate,
   parseHourlyTickets,
   parseSummaryTickets,
@@ -264,7 +266,12 @@ export default function AgentDashboardPage() {
     () => hourSlots.filter((hour) => (hourlyCounts[hour.key] || 0) > 0).length,
     [hourlyCounts]
   )
-  const ticketsPerHour = activeHourlySlots > 0 ? summaryTotalTickets / activeHourlySlots : 0
+  const rawTicketMetrics = useMemo(() => calculateAgentMetrics(tickets), [tickets])
+  const summaryMetrics = useMemo(
+    () => calculateMetricsFromRawDuration(summaryTotalTickets, activeHourlySlots * 60),
+    [activeHourlySlots, summaryTotalTickets]
+  )
+  const displayedMetrics = dataSource === 'tph' ? rawTicketMetrics : summaryMetrics
   const maxHourlyBarValue = useMemo(() => Math.max(1, ...Object.values(hourlyCounts)), [hourlyCounts])
 
   if (isLoading) {
@@ -359,11 +366,11 @@ export default function AgentDashboardPage() {
             <div className="rounded-lg border border-outline-variant/60 bg-surface/90 p-4">
               <div className="flex items-center gap-2 text-on-surface-variant">
                 <Gauge size={18} className="text-primary-container" />
-                <p className="text-label-md font-semibold uppercase">TPH</p>
+              <p className="text-label-md font-semibold uppercase">TPH</p>
               </div>
-              <p className="mt-3 font-hanken text-headline-md font-bold text-on-surface">{ticketsPerHour.toFixed(2)}</p>
+              <p className="mt-3 font-hanken text-headline-md font-bold text-on-surface">{displayedMetrics.tph.toFixed(1)}</p>
               <p className="mt-1 text-xs font-medium text-on-surface-variant">
-                {activeHourlySlots} active {activeHourlySlots === 1 ? 'hour' : 'hours'}
+                {displayedMetrics.formattedNetDuration} net
               </p>
             </div>
             <div className="rounded-lg border border-outline-variant/60 bg-surface/90 p-4">
@@ -444,6 +451,20 @@ export default function AgentDashboardPage() {
                 <p className="text-label-md font-semibold uppercase">Total Tickets</p>
               </div>
               <p className="mt-3 font-hanken text-headline-md font-bold text-on-surface">{summaryTotalTickets}</p>
+            </div>
+            <div className="rounded-lg border border-outline-variant/60 bg-surface/90 p-4">
+              <div className="flex items-center gap-2 text-on-surface-variant">
+                <Gauge size={18} className="text-primary-container" />
+                <p className="text-label-md font-semibold uppercase">TPH</p>
+              </div>
+              <p className="mt-3 font-hanken text-headline-md font-bold text-on-surface">{displayedMetrics.tph.toFixed(1)}</p>
+            </div>
+            <div className="rounded-lg border border-outline-variant/60 bg-surface/90 p-4">
+              <div className="flex items-center gap-2 text-on-surface-variant">
+                <Clock3 size={18} className="text-primary-container" />
+                <p className="text-label-md font-semibold uppercase">Duration</p>
+              </div>
+              <p className="mt-3 font-hanken text-headline-md font-bold text-on-surface">{displayedMetrics.formattedNetDuration}</p>
             </div>
             <div className="rounded-lg border border-outline-variant/60 bg-surface/90 p-4">
               <div className="flex items-center gap-2 text-on-surface-variant">

@@ -17,7 +17,14 @@ type AuthCookiePayload = {
 export type AuthenticatedUser = Omit<AuthCookiePayload, 'iat' | 'exp'>
 
 function getAuthCookieSecret() {
-  return process.env.AUTH_COOKIE_SECRET || process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET || null
+  return (
+    process.env.AUTH_COOKIE_SECRET ||
+    process.env.AUTH_SECRET ||
+    process.env.NEXTAUTH_SECRET ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.WEBEX_CLIENT_SECRET ||
+    null
+  )
 }
 
 function safeEqual(a: string, b: string) {
@@ -27,20 +34,20 @@ function safeEqual(a: string, b: string) {
   return left.length === right.length && timingSafeEqual(left, right)
 }
 
-function signPayload(payload: AuthCookiePayload) {
+function signPayload(payload: AuthCookiePayload, sessionToken: string) {
   const secret = getAuthCookieSecret()
 
   if (!secret) return null
 
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url')
   const signature = createHmac('sha256', secret)
-    .update(body)
+    .update(`${body}.${sessionToken}`)
     .digest('base64url')
 
   return `${body}.${signature}`
 }
 
-function verifyPayload(value: string): AuthCookiePayload | null {
+function verifyPayload(value: string, sessionToken: string): AuthCookiePayload | null {
   const secret = getAuthCookieSecret()
 
   if (!secret) return null
@@ -52,7 +59,7 @@ function verifyPayload(value: string): AuthCookiePayload | null {
   }
 
   const expectedSignature = createHmac('sha256', secret)
-    .update(body)
+    .update(`${body}.${sessionToken}`)
     .digest('base64url')
 
   if (!safeEqual(signature, expectedSignature)) {
@@ -72,22 +79,26 @@ function verifyPayload(value: string): AuthCookiePayload | null {
   }
 }
 
-export function signAuthCookie(user: AuthenticatedUser) {
+export function signAuthCookie(user: AuthenticatedUser, sessionToken: string) {
   const now = Math.floor(Date.now() / 1000)
 
   return signPayload({
     ...user,
     iat: now,
     exp: now + AUTH_COOKIE_MAX_AGE_SECONDS,
-  })
+  }, sessionToken)
 }
 
-export function verifyAuthCookie(value: string): AuthenticatedUser | null {
-  return verifyPayload(value) ?? null
+export function verifyAuthCookie(value: string, sessionToken: string): AuthenticatedUser | null {
+  return verifyPayload(value, sessionToken) ?? null
 }
 
-export function setAuthCookie(response: NextResponse, user: AuthenticatedUser) {
-  const signedCookie = signAuthCookie(user)
+export function setAuthCookie(
+  response: NextResponse,
+  user: AuthenticatedUser,
+  sessionToken: string,
+) {
+  const signedCookie = signAuthCookie(user, sessionToken)
 
   if (!signedCookie) return
 
@@ -95,6 +106,7 @@ export function setAuthCookie(response: NextResponse, user: AuthenticatedUser) {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
+    path: '/',
     maxAge: AUTH_COOKIE_MAX_AGE_SECONDS,
   })
 }
@@ -103,12 +115,15 @@ export function clearAuthCookie(response: NextResponse) {
   response.cookies.delete(AUTH_COOKIE_NAME)
 }
 
-export function getAuthCookieUser(request: NextRequest): AuthenticatedUser | null {
+export function getAuthCookieUser(
+  request: NextRequest,
+  sessionToken: string,
+): AuthenticatedUser | null {
   const authCookie = request.cookies.get(AUTH_COOKIE_NAME)
 
   if (!authCookie?.value) {
     return null
   }
 
-  return verifyAuthCookie(authCookie.value)
+  return verifyAuthCookie(authCookie.value, sessionToken)
 }

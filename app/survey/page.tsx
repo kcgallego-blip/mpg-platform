@@ -14,7 +14,7 @@ import {
   X,
 } from 'lucide-react'
 import Navigation from '@/components/Navigation'
-import { useAuthStore } from '@/lib/authStore'
+import { useRequireAuth } from '@/lib/useRequireAuth'
 
 type SurveyRow = {
   survey_date: string | null
@@ -157,8 +157,7 @@ function SurveyCarousel({
 
 export default function SurveyPage() {
   const router = useRouter()
-  const { user, loading, checkAuth, rehydrateFromStorage } = useAuthStore()
-  const [isCheckingAuth, setIsCheckingAuth] = useState(true)
+  const { user, isReady } = useRequireAuth()
   const [survey, setSurvey] = useState<SurveyRow[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isUploading, setIsUploading] = useState(false)
@@ -223,26 +222,10 @@ export default function SurveyPage() {
   }, [periodType, selectedPeriod, router])
 
   useEffect(() => {
-    const initAuth = async () => {
-      rehydrateFromStorage()
-      await checkAuth()
-      setIsCheckingAuth(false)
-    }
-
-    initAuth()
-  }, [checkAuth, rehydrateFromStorage])
-
-  useEffect(() => {
-    if (!isCheckingAuth && !user) {
-      router.push('/login')
-    }
-  }, [user, isCheckingAuth, router])
-
-  useEffect(() => {
-    if (user) {
+    if (isReady && user) {
       loadSurvey()
     }
-  }, [user, loadSurvey])
+  }, [isReady, user, loadSurvey])
 
   useEffect(() => {
     if (!notification) return
@@ -373,7 +356,7 @@ export default function SurveyPage() {
     }
   }
 
-  if (isCheckingAuth || loading || (user && isLoading)) {
+  if (!isReady || isLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="text-center">

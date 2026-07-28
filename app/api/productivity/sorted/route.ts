@@ -2,10 +2,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getAuthenticatedDbUser } from '@/lib/sessionAuth'
 import { supabase } from '@/lib/supabase'
 import {
+  calculateAgentMetrics,
+  calculateMetricsFromRawDuration,
+  formatDurationMinutes,
   getStatusFilteredCounts,
   getTotalTicketCount,
   getTphDataSourceForShiftDate,
   normalizeNameForMatch,
+  parseHourlyTickets,
   parseSummaryTickets,
 } from '@/lib/tphProductivity'
 
@@ -68,14 +72,6 @@ const getAuthenticatedUser = async (request: NextRequest) => {
     name: dbUser.name || '',
     role: dbUser.role,
   }
-}
-
-const formatDuration = (durationMs: number) => {
-  const totalMinutes = Math.floor(durationMs / (60 * 1000))
-  const hours = Math.floor(totalMinutes / 60)
-  const minutes = totalMinutes % 60
-
-  return `${hours}h ${minutes}m`
 }
 
 const getPhilippineDate = (date: Date) => {
@@ -156,9 +152,11 @@ export async function GET(request: NextRequest) {
 
       ;((summaryData || []) as TphSummaryRow[]).forEach((row) => {
         const statusCounts = getStatusFilteredCounts(parseSummaryTickets(row.tickets), status)
-
+        const hourlyCounts = parseHourlyTickets(row.hourly_tickets)
         const totalTickets = getTotalTicketCount(statusCounts)
         if (status !== 'All' && totalTickets === 0) return
+        const activeHours = Object.values(hourlyCounts).filter((count) => count > 0).length
+        const metrics = calculateMetricsFromRawDuration(totalTickets, activeHours * 60)
 
         summariesByEmail.set(row.agent, {
           email: row.agent,
@@ -166,7 +164,7 @@ export async function GET(request: NextRequest) {
           totalTickets,
           firstTicketTime: null,
           latestTicketTime: null,
-          shiftDurationMs: 0,
+          shiftDurationMs: metrics.netDurationMinutes * 60 * 1000,
         })
       })
 
@@ -226,7 +224,7 @@ export async function GET(request: NextRequest) {
         source: dataSource,
         agents: summaries.map((summary) => ({
           ...summary,
-          shiftDuration: formatDuration(summary.shiftDurationMs),
+          shiftDuration: formatDurationMinutes(summary.shiftDurationMs / (60 * 1000)),
         })),
       })
     }
@@ -264,12 +262,14 @@ export async function GET(request: NextRequest) {
 
     const rows = allTphRows
     const summariesByEmail = new Map<string, AgentSummary>()
+    const rowsByEmail = new Map<string, TphRow[]>()
 
     rows.forEach((row) => {
       if (!row.agent) return
 
       const createdAtTime = Date.parse(row.created_at)
       const existingSummary = summariesByEmail.get(row.agent)
+      rowsByEmail.set(row.agent, [...(rowsByEmail.get(row.agent) || []), row])
 
       if (!existingSummary) {
         summariesByEmail.set(row.agent, {
@@ -341,14 +341,12 @@ export async function GET(request: NextRequest) {
     }
 
     const summaries = summariesForRole.map((summary) => {
-      const firstTime = summary.firstTicketTime ? Date.parse(summary.firstTicketTime) : 0
-      const latestTime = summary.latestTicketTime ? Date.parse(summary.latestTicketTime) : 0
-      const shiftDurationMs = Math.max(latestTime - firstTime, 0)
+      const metrics = calculateAgentMetrics(rowsByEmail.get(summary.email) || [])
 
       return {
         ...summary,
-        shiftDurationMs,
-        shiftDuration: formatDuration(shiftDurationMs),
+        shiftDurationMs: metrics.netDurationMinutes * 60 * 1000,
+        shiftDuration: metrics.formattedNetDuration,
       }
     })
 

@@ -145,12 +145,40 @@ export async function GET(request: NextRequest) {
 
     query = query.order(safeSortBy, { ascending: safeOrder }).order('created_at', { ascending: false })
 
-    const { data: rawStats, error: statsError } = await query
+    const periodQuery = supabase
+      .from(isMonthly ? 'stats_month' : 'stats')
+      .select(isMonthly ? 'month, name' : 'week, name')
+      .order(isMonthly ? 'month' : 'week', { ascending: false })
+
+    const [statsResult, periodsResult] = await Promise.all([query, periodQuery])
+    const { data: rawStats, error: statsError } = statsResult
 
     if (statsError) {
       console.error('Stats fetch error:', statsError)
       return NextResponse.json({ error: 'Failed to fetch stats' }, { status: 500 })
     }
+
+    if (periodsResult.error) {
+      // Keep the selected-period response usable if the optional period list
+      // query fails. The page will fall back to its calendar-based options.
+      console.error('Stats period fetch error:', periodsResult.error)
+    }
+
+    const availablePeriods = Array.from(
+      new Set(
+        ((periodsResult.data || []) as Array<{
+          month?: unknown
+          name?: string | null
+          week?: unknown
+        }>)
+          .filter(stat =>
+            userRole.toLowerCase() !== 'agent' ||
+            getFuzzyNameScore(stat.name, userName) >= FUZZY_NAME_MATCH_THRESHOLD
+          )
+          .map(stat => Number(isMonthly ? stat.month : stat.week))
+          .filter(period => Number.isInteger(period) && period > 0)
+      )
+    ).sort((a, b) => b - a)
 
     const statsForWeek = rawStats || []
 
@@ -186,6 +214,7 @@ export async function GET(request: NextRequest) {
       range: selectedRange,
       periodType,
       periodValue: selectedPeriodValue,
+      availablePeriods,
     })
   } catch (error) {
     console.error('Stats API error:', error)

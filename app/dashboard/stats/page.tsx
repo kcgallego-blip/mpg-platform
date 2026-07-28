@@ -15,6 +15,7 @@ import {
   getStatsMonthName,
   getStatsMonthOptions,
   getStatsWeekNumber,
+  getStatsWeekOptions,
   getStatsWeekRange,
   getStatsWeekRangeLabel,
   isScorePassing,
@@ -149,6 +150,8 @@ export default function StatsPage() {
   const [sortConfig, setSortConfig] = useState<SortConfig>({ field: 'name', order: 'asc' })
   const [userRole, setUserRole] = useState<string | null>(null)
   const isAgentView = userRole?.toLowerCase() === 'agent'
+  const [availableWeeks, setAvailableWeeks] = useState<number[]>([])
+  const [availableMonths, setAvailableMonths] = useState<number[]>([])
   const [selectedWeek, setSelectedWeek] = useState(() => getStatsWeekNumber())
   const [selectedMonth, setSelectedMonth] = useState(() => new Date().getMonth() + 1)
   const [periodType, setPeriodType] = useState<'weekly' | 'monthly'>('weekly')
@@ -163,18 +166,11 @@ export default function StatsPage() {
 
   const periodOptions = useMemo(() => {
     if (periodType === 'monthly') {
-      return getStatsMonthOptions()
+      return Array.from(new Set([...getStatsMonthOptions(), ...availableMonths])).sort((a, b) => a - b)
     }
 
-    const currentWeek = getStatsWeekNumber()
-    const oldestWeek = 23
-    const startWeek = currentWeek >= oldestWeek ? Math.max(oldestWeek, currentWeek - 11) : 1
-
-    return Array.from(
-      { length: currentWeek - startWeek + 1 },
-      (_, index) => currentWeek - index
-    )
-  }, [periodType])
+    return getStatsWeekOptions(getStatsWeekNumber(), availableWeeks)
+  }, [periodType, availableMonths, availableWeeks])
 
   const loadStats = useCallback(async () => {
     if (!user?.email) {
@@ -210,6 +206,16 @@ export default function StatsPage() {
       setSupervisors(data.supervisors || [])
       setDisplayedRange(data.range || getStatsWeekRange())
       setUserRole(data.userRole)
+      const normalizedAvailablePeriods = Array.isArray(data.availablePeriods)
+        ? data.availablePeriods.filter((period: unknown): period is number =>
+            typeof period === 'number' && Number.isInteger(period) && period > 0
+          )
+        : []
+      if (data.periodType === 'monthly') {
+        setAvailableMonths(normalizedAvailablePeriods)
+      } else {
+        setAvailableWeeks(normalizedAvailablePeriods)
+      }
       if (data.periodType) {
         setPeriodType(data.periodType)
       }

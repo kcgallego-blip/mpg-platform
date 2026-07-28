@@ -24,6 +24,25 @@ create table if not exists public.users (
 comment on table public.users is 'User profiles extended from auth.users';
 
 -- ============================================================================
+-- 1A. FEATURE SETTINGS TABLE
+-- ============================================================================
+
+create table if not exists public.feature_settings (
+  key text primary key,
+  enabled boolean not null default false,
+  updated_at timestamp with time zone not null default now(),
+  updated_by text
+);
+
+insert into public.feature_settings (key, enabled)
+values ('attendance_route_enabled', false)
+on conflict (key) do nothing;
+
+alter table public.feature_settings enable row level security;
+
+comment on table public.feature_settings is 'Server-managed application feature switches';
+
+-- ============================================================================
 -- 2. REPORTS TABLE
 -- ============================================================================
 

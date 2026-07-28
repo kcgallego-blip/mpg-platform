@@ -30,6 +30,62 @@ export interface Database {
           updated_at?: string
         }
       }
+      suggestions: {
+        Row: {
+          agent: string
+          created_at: string
+          suggest: string | null
+        }
+        Insert: {
+          agent: string
+          created_at?: string
+          suggest?: string | null
+        }
+        Update: {
+          agent?: string
+          created_at?: string
+          suggest?: string | null
+        }
+      }
+      attendance: {
+        Row: {
+          agent: string
+          shift_date: string
+          time_in: string | null
+          time_out: string | null
+        }
+        Insert: {
+          agent: string
+          shift_date: string
+          time_in?: string | null
+          time_out?: string | null
+        }
+        Update: {
+          agent?: string
+          shift_date?: string
+          time_in?: string | null
+          time_out?: string | null
+        }
+      }
+      feature_settings: {
+        Row: {
+          key: string
+          enabled: boolean
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          key: string
+          enabled?: boolean
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          enabled?: boolean
+          updated_at?: string
+          updated_by?: string | null
+        }
+      }
       agents: {
         Row: {
           name: string

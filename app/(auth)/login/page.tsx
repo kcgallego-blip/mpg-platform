@@ -10,7 +10,13 @@ import Image from 'next/image'
 function LoginPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const { user, checkAuth, loginWithEmail, loginWithWebex, rehydrateFromStorage } = useAuthStore()
+  const {
+    user,
+    completeExternalLogin,
+    loginWithEmail,
+    loginWithWebex,
+    rehydrateFromStorage,
+  } = useAuthStore()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -26,18 +32,23 @@ function LoginPageContent() {
 
     hasCheckedAuth.current = true
 
-    const verifyAuth = async () => {
+    const initializeLogin = async () => {
       try {
-        rehydrateFromStorage()
-        await checkAuth()
-        setIsCheckingAuth(false)
-      } catch (err) {
+        const storedUser = rehydrateFromStorage()
+        const isExternalLogin = searchParams.get('oauth') === 'success'
+
+        if (!storedUser && isExternalLogin) {
+          await completeExternalLogin()
+        }
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : 'Unable to complete login')
+      } finally {
         setIsCheckingAuth(false)
       }
     }
 
-    verifyAuth()
-  }, [checkAuth, rehydrateFromStorage])
+    void initializeLogin()
+  }, [completeExternalLogin, rehydrateFromStorage, searchParams])
 
   useEffect(() => {
     const registeredParam = searchParams.get('registered')

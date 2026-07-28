@@ -1,32 +1,13 @@
 'use client'
 
-import { useEffect, useState, ReactNode } from 'react'
-import { useRouter } from 'next/navigation'
-import { useAuthStore } from '@/lib/authStore'
+import { ReactNode } from 'react'
 import Navigation from '@/components/Navigation'
+import { useRequireAuth } from '@/lib/useRequireAuth'
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
-  const router = useRouter()
-  const { user, loading, checkAuth, rehydrateFromStorage } = useAuthStore()
-  const [isCheckingAuth, setIsCheckingAuth] = useState(true)
+  const { user, isReady } = useRequireAuth()
 
-  useEffect(() => {
-    const initAuth = async () => {
-      rehydrateFromStorage()
-      await checkAuth()
-      setIsCheckingAuth(false)
-    }
-
-    initAuth()
-  }, [checkAuth, rehydrateFromStorage])
-
-  useEffect(() => {
-    if (!isCheckingAuth && !user) {
-      router.push('/login')
-    }
-  }, [user, isCheckingAuth, router])
-
-  if (isCheckingAuth || loading) {
+  if (!isReady) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
@@ -37,9 +18,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     )
   }
 
-  if (!user) {
-    return null
-  }
+  if (!user) return null
 
   if (!user.role) {
     return (

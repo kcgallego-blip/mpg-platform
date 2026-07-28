@@ -1,7 +1,7 @@
 import '@/styles/globals.css'
 
 export const metadata = {
-  title: 'CLAD - Analytics Platform',
+  title: 'CLAD Portal',
   description: 'Professional BPO Analytics & Reports Dashboard',
 }
 

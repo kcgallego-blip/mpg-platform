@@ -14,33 +14,33 @@ export type AuthenticatedDbUser = {
 export async function getAuthenticatedDbUser(request: NextRequest): Promise<AuthenticatedDbUser | null> {
   const sessionToken = getSessionTokenCookie(request)
 
-  if (sessionToken) {
-    const { data: tokenUser, error: tokenError } = await supabase
-      .from('users')
-      .select('email, name, avatar_image, role, is_active')
-      .eq('token', sessionToken)
-      .maybeSingle()
+  if (!sessionToken) {
+    return null
+  }
 
-    if (!tokenError && tokenUser?.is_active === true) {
-      return tokenUser
+  const cachedUser = getAuthCookieUser(request, sessionToken)
+
+  if (cachedUser) {
+    return {
+      email: cachedUser.email,
+      name: cachedUser.name,
+      avatar_image: cachedUser.avatar_image ?? null,
+      role: cachedUser.role ?? null,
+      is_active: true,
     }
   }
 
-  const cookieUser = getAuthCookieUser(request)
-
-  if (!cookieUser?.email) {
-    return null
-  }
-
-  const { data: dbUser, error: dbError } = await supabase
+  // Backward compatibility for sessions created before RBAC snapshots were
+  // introduced. A fresh login upgrades the session to the no-query path.
+  const { data: tokenUser, error: tokenError } = await supabase
     .from('users')
     .select('email, name, avatar_image, role, is_active')
-    .eq('email', cookieUser.email)
+    .eq('token', sessionToken)
     .maybeSingle()
 
-  if (dbError || !dbUser || dbUser.is_active !== true) {
-    return null
+  if (!tokenError && tokenUser?.is_active === true) {
+    return tokenUser
   }
 
-  return dbUser
+  return null
 }

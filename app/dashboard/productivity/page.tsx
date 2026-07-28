@@ -7,6 +7,9 @@ import { supabase } from '@/lib/supabase'
 import {
   TPH_STATUS_DISPLAY_COLUMNS,
   TphDataSource,
+  calculateAgentMetrics,
+  calculateMetricsFromRawDuration,
+  calculateTicketsPerHour,
   getStatusFilteredCounts,
   getTotalTicketCount,
   getTphDataSourceForShiftDate,
@@ -146,14 +149,6 @@ const formatTicketTime = (timestamp: string | null) => {
   }).format(new Date(timestamp))
 }
 
-const formatDuration = (durationMs: number) => {
-  const totalMinutes = Math.floor(durationMs / (60 * 1000))
-  const hours = Math.floor(totalMinutes / 60)
-  const minutes = totalMinutes % 60
-
-  return `${hours}h ${minutes}m`
-}
-
 const hourSlots = Array.from({ length: 18 }, (_, index) => {
   const hour = (18 + index) % 24
   const label = new Intl.DateTimeFormat('en-US', {
@@ -167,26 +162,11 @@ const hourSlots = Array.from({ length: 18 }, (_, index) => {
   }
 })
 
-const RELEVANT_TPH_STATUSES = ['Pending', 'On-Hold', 'Solved'] as const
-
-const getRelevantTphTicketTotal = (statusCounts: Record<string, number>) =>
-  RELEVANT_TPH_STATUSES.reduce((total, status) => {
-    return total + (statusCounts[status] || 0)
-  }, 0)
-
-const getActiveHourTphAverage = (statusCounts: Record<string, number>, hourlyCounts: Record<string, number>) => {
-  const relevantTicketTotal = getRelevantTphTicketTotal(statusCounts)
+const getSummaryMetrics = (statusCounts: Record<string, number>, hourlyCounts: Record<string, number>) => {
+  const ticketTotal = getTotalTicketCount(statusCounts)
   const activeHours = Object.values(hourlyCounts).filter((count) => count > 0).length
-  const adjustedActiveHours = activeHours > 5 ? activeHours - 1 : activeHours
 
-  return adjustedActiveHours > 0 ? relevantTicketTotal / adjustedActiveHours : 0
-}
-
-const getDurationTphAverage = (statusCounts: Record<string, number>, durationMs: number) => {
-  const durationHours = durationMs / (60 * 60 * 1000)
-  const adjustedDurationHours = durationHours > 5 ? durationHours - 1 : durationHours
-
-  return adjustedDurationHours > 0 ? getRelevantTphTicketTotal(statusCounts) / adjustedDurationHours : 0
+  return calculateMetricsFromRawDuration(ticketTotal, activeHours * 60)
 }
 
 const getHeatMapColor = (count: number) => {
@@ -309,6 +289,7 @@ export default function ProductivityPage() {
           const allStatusCounts = parseSummaryTickets(row.tickets)
           const statusCounts = getStatusFilteredCounts(allStatusCounts, selectedStatus)
           const hourlyCounts = parseHourlyTickets(row.hourly_tickets)
+          const metrics = getSummaryMetrics(statusCounts, hourlyCounts)
 
           return {
             email: row.agent,
@@ -316,11 +297,11 @@ export default function ProductivityPage() {
             total: getTotalTicketCount(statusCounts),
             statusCounts,
             hourlyCounts,
-            tphAverage: getActiveHourTphAverage(allStatusCounts, hourlyCounts),
+            tphAverage: metrics.tph,
             firstTicketTime: null,
             latestTicketTime: null,
-            shiftDuration: '-',
-            shiftDurationMs: 0,
+            shiftDuration: metrics.formattedNetDuration,
+            shiftDurationMs: metrics.netDurationMinutes * 60 * 1000,
             source: 'tph_summary',
           }
         }).filter((row) => selectedStatus === 'All' || row.total > 0)
@@ -362,6 +343,7 @@ export default function ProductivityPage() {
       )
       const namesByEmail = await getNamesByEmail(emails)
       const rowsByEmail = new Map<string, AgentProductivity>()
+      const ticketsByEmail = new Map<string, TphTicket[]>()
 
       nextTickets.forEach((ticket) => {
         if (!ticket.agent) return
@@ -390,6 +372,7 @@ export default function ProductivityPage() {
         row.total += 1
         row.statusCounts[status] = (row.statusCounts[status] || 0) + 1
         row.hourlyCounts[hourKey] = (row.hourlyCounts[hourKey] || 0) + 1
+        ticketsByEmail.set(ticket.agent, [...(ticketsByEmail.get(ticket.agent) || []), ticket])
 
         if (!row.firstTicketTime || createdAtTime < firstTime) {
           row.firstTicketTime = ticket.created_at
@@ -403,15 +386,13 @@ export default function ProductivityPage() {
       })
 
       const nextRows = Array.from(rowsByEmail.values()).map((row) => {
-        const firstTime = row.firstTicketTime ? Date.parse(row.firstTicketTime) : 0
-        const latestTime = row.latestTicketTime ? Date.parse(row.latestTicketTime) : 0
-        const shiftDurationMs = Math.max(latestTime - firstTime, 0)
+        const metrics = calculateAgentMetrics(ticketsByEmail.get(row.email) || [])
 
         return {
           ...row,
-          tphAverage: getDurationTphAverage(row.statusCounts, shiftDurationMs),
-          shiftDurationMs,
-          shiftDuration: formatDuration(shiftDurationMs),
+          tphAverage: metrics.tph,
+          shiftDurationMs: metrics.netDurationMinutes * 60 * 1000,
+          shiftDuration: metrics.formattedNetDuration,
         }
       })
 
@@ -482,7 +463,7 @@ export default function ProductivityPage() {
           shiftDurationMs: sortedSummary.shiftDurationMs,
           tphAverage:
             row.source === 'tph'
-              ? getDurationTphAverage(row.statusCounts, sortedSummary.shiftDurationMs)
+              ? calculateTicketsPerHour(row.total, sortedSummary.shiftDurationMs / (60 * 1000))
               : row.tphAverage,
         }
       }
@@ -516,9 +497,7 @@ export default function ProductivityPage() {
           summary.hourlyCounts[hour.key] = (summary.hourlyCounts[hour.key] || 0) + (row.hourlyCounts[hour.key] || 0)
         })
         summary.shiftDurationMs += row.shiftDurationMs
-        summary.tphAverage = summary.shiftDurationMs > 0
-          ? getDurationTphAverage(summary.statusCounts, summary.shiftDurationMs)
-          : getActiveHourTphAverage(summary.statusCounts, summary.hourlyCounts)
+        summary.tphAverage = calculateTicketsPerHour(summary.tickets, summary.shiftDurationMs / (60 * 1000))
         return summary
       },
       {
@@ -705,7 +684,7 @@ export default function ProductivityPage() {
                       ))}
                       <td className="px-4 py-3 text-center text-sm font-bold text-primary-container">{row.total}</td>
                       {showTphColumn && (
-                        <td className="px-4 py-3 text-center text-sm font-semibold text-on-surface">{row.tphAverage.toFixed(2)}</td>
+                        <td className="px-4 py-3 text-center text-sm font-semibold text-on-surface">{row.tphAverage.toFixed(1)}</td>
                       )}
                       <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">{row.shiftDuration}</td>
                     </tr>
@@ -720,7 +699,7 @@ export default function ProductivityPage() {
                       ))}
                       <td className="px-4 py-3 text-center text-sm font-bold text-primary-container">{totals.tickets}</td>
                       {showTphColumn && (
-                        <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">{totals.tphAverage.toFixed(2)}</td>
+                        <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">{totals.tphAverage.toFixed(1)}</td>
                       )}
                       <td className="px-4 py-3 text-center text-sm font-bold text-on-surface">-</td>
                     </tr>
@@ -750,7 +729,7 @@ export default function ProductivityPage() {
                       </div>
                       <div className="flex items-center gap-2 text-xs font-semibold text-on-surface-variant shrink-0">
                         <span className="rounded-full bg-primary-container/15 px-2 py-0.5 text-primary-container">{row.total}</span>
-                        {showTphColumn && <span className="rounded-full bg-surface-container-high px-2 py-0.5">TPH {row.tphAverage.toFixed(2)}</span>}
+                        {showTphColumn && <span className="rounded-full bg-surface-container-high px-2 py-0.5">TPH {row.tphAverage.toFixed(1)}</span>}
                       </div>
                     </div>
                   ))}

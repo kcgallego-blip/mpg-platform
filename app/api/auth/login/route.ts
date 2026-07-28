@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { setSessionTokenCookie, createSessionToken } from '@/lib/sessionToken'
 import { supabase } from '@/lib/supabase'
 import { verifyPassword } from '@/lib/password'
+import { setAuthCookie } from '@/lib/authCookie'
 
 const ALLOWED_EMAIL_DOMAIN = '@m-piece.com'
 
@@ -67,6 +68,13 @@ export async function POST(request: NextRequest) {
     })
 
     setSessionTokenCookie(response, sessionToken)
+    setAuthCookie(response, {
+      email: user.email,
+      name: user.name,
+      avatar_image: user.avatar_image,
+      role: user.role,
+      company: null,
+    }, sessionToken)
 
     return response
   } catch (error: any) {

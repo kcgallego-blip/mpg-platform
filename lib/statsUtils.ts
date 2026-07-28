@@ -25,6 +25,24 @@ export function getStatsWeekNumber(date = new Date()): number {
   return Math.floor(daysSinceYearStart) + 1
 }
 
+export function getStatsWeekOptions(
+  currentWeek = getStatsWeekNumber(),
+  availableWeeks: number[] = []
+): number[] {
+  const normalizedCurrentWeek = Math.max(1, Math.floor(currentWeek) || 1)
+  const normalizedAvailableWeeks = availableWeeks.filter(
+    week => Number.isInteger(week) && week > 0
+  )
+  const latestWeek = Math.max(normalizedCurrentWeek, ...normalizedAvailableWeeks)
+  const oldestWeek = 23
+  const startWeek = latestWeek >= oldestWeek ? Math.max(oldestWeek, latestWeek - 11) : 1
+
+  return Array.from(
+    { length: latestWeek - startWeek + 1 },
+    (_, index) => latestWeek - index
+  )
+}
+
 export function getStatsWeekRange(date = new Date()): number {
   return date.getDay() + 1
 }

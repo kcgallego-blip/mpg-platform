@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createSessionToken, setSessionTokenCookie } from '@/lib/sessionToken'
 import { supabase } from '@/lib/supabase'
+import { setAuthCookie } from '@/lib/authCookie'
 
 export async function GET(request: NextRequest) {
   try {
@@ -151,8 +152,15 @@ export async function GET(request: NextRequest) {
       // Continue anyway - user might already exist
     }
 
-    const response = NextResponse.redirect(new URL('/dashboard', request.url))
+    const response = NextResponse.redirect(new URL('/login?oauth=success', request.url))
     setSessionTokenCookie(response, sessionToken)
+    setAuthCookie(response, {
+      email: existingUser.email,
+      name: existingUser.name || name || null,
+      avatar_image: existingUser.avatar_image || avatar || null,
+      role: existingUser.role,
+      company: null,
+    }, sessionToken)
 
     return response
   } catch (error) {
