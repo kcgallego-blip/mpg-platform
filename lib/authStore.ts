@@ -1,7 +1,15 @@
 import { create } from 'zustand'
 
-const AUTH_STORAGE_KEY = 'mpg_auth_session'
+export const AUTH_SYNC_STORAGE_KEY = 'mpg_auth_sync'
+
+const LEGACY_SESSION_STORAGE_KEY = 'mpg_auth_session'
 const LEGACY_AUTH_STORAGE_KEY = 'mpg_auth_user'
+
+type AuthSyncEvent = {
+  type: 'login' | 'logout'
+  timestamp: number
+  nonce: string
+}
 
 export interface User {
   email: string
@@ -20,64 +28,62 @@ interface AuthStore {
   initialized: boolean
   loading: boolean
   error: string | null
+  initializeSession: (force?: boolean) => Promise<User | null>
+  refreshSession: () => Promise<boolean>
   loginWithEmail: (email: string, password: string) => Promise<void>
   loginWithWebex: () => Promise<void>
   register: (email: string, name: string, password: string) => Promise<void>
   logout: () => Promise<void>
-  completeExternalLogin: () => Promise<void>
-  rehydrateFromStorage: () => User | null
+  applyRemoteLogout: () => void
 }
 
-function isStoredUser(value: unknown): value is User {
-  if (!value || typeof value !== 'object') return false
+let initializationPromise: Promise<User | null> | null = null
 
-  const user = value as Partial<User>
-
-  return (
-    typeof user.email === 'string' &&
-    typeof user.name === 'string' &&
-    (user.role === null || typeof user.role === 'string')
-  )
-}
-
-const persistUserToStorage = (user: User | null) => {
+function clearLegacyAuthStorage() {
   if (typeof window === 'undefined') return
 
   try {
-    // RBAC state is scoped to the active browser tab/session and is always
-    // cleared on logout. Authentication remains in HttpOnly cookies.
-    if (user) {
-      sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user))
-    } else {
-      sessionStorage.removeItem(AUTH_STORAGE_KEY)
-    }
-
-    // Do not carry the old, persistent RBAC snapshot into a new session.
+    sessionStorage.removeItem(LEGACY_SESSION_STORAGE_KEY)
     localStorage.removeItem(LEGACY_AUTH_STORAGE_KEY)
   } catch {
-    // The in-memory session remains usable when browser storage is unavailable.
+    // HttpOnly cookies remain the authoritative session when storage is blocked.
   }
 }
 
-const getUserFromStorage = (): User | null => {
-  if (typeof window === 'undefined') return null
+function broadcastAuthChange(type: AuthSyncEvent['type']) {
+  if (typeof window === 'undefined') return
 
   try {
-    const stored = sessionStorage.getItem(AUTH_STORAGE_KEY)
-    if (!stored) return null
-
-    const storedUser: unknown = JSON.parse(stored)
-
-    if (!isStoredUser(storedUser)) {
-      sessionStorage.removeItem(AUTH_STORAGE_KEY)
-      return null
+    const event: AuthSyncEvent = {
+      type,
+      timestamp: Date.now(),
+      nonce: Math.random().toString(36).slice(2),
     }
 
-    return storedUser
+    localStorage.setItem(AUTH_SYNC_STORAGE_KEY, JSON.stringify(event))
   } catch {
-    sessionStorage.removeItem(AUTH_STORAGE_KEY)
-    return null
+    // Other tabs will still validate the shared cookies when they are opened.
   }
+}
+
+export function parseAuthSyncEvent(value: string | null): AuthSyncEvent | null {
+  if (!value) return null
+
+  try {
+    const event = JSON.parse(value) as Partial<AuthSyncEvent>
+
+    if (
+      (event.type === 'login' || event.type === 'logout') &&
+      typeof event.timestamp === 'number' &&
+      typeof event.nonce === 'string'
+    ) {
+      return event as AuthSyncEvent
+    }
+  } catch {
+    // Ignore malformed or unrelated browser storage values.
+  }
+
+  return null
 }
 
 function toUser(userData: Record<string, unknown>): User {
@@ -98,16 +104,77 @@ function toUser(userData: Record<string, unknown>): User {
   }
 }
 
-export const useAuthStore = create<AuthStore>((set) => ({
+async function fetchCurrentUser(): Promise<User | null> {
+  const response = await fetch('/api/auth/me', {
+    cache: 'no-store',
+    credentials: 'same-origin',
+  })
+
+  if (response.status === 401) {
+    return null
+  }
+
+  if (!response.ok) {
+    throw new Error('Unable to verify your session')
+  }
+
+  const userData = await response.json() as Record<string, unknown>
+  return toUser(userData)
+}
+
+export const useAuthStore = create<AuthStore>((set, get) => ({
   user: null,
   initialized: false,
   loading: false,
   error: null,
 
-  rehydrateFromStorage: () => {
-    const storedUser = getUserFromStorage()
-    set({ user: storedUser, initialized: true })
-    return storedUser
+  initializeSession: async (force = false) => {
+    if (get().initialized && !force) {
+      return get().user
+    }
+
+    if (initializationPromise) {
+      return initializationPromise
+    }
+
+    clearLegacyAuthStorage()
+    set({ loading: true, error: null })
+
+    initializationPromise = (async () => {
+      try {
+        const user = await fetchCurrentUser()
+        set({ user, initialized: true, loading: false, error: null })
+        return user
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'Unable to verify your session'
+        set({ initialized: true, loading: false, error: message })
+        return get().user
+      } finally {
+        initializationPromise = null
+      }
+    })()
+
+    return initializationPromise
+  },
+
+  refreshSession: async () => {
+    try {
+      const user = await fetchCurrentUser()
+
+      if (!user) {
+        set({ user: null, initialized: true, error: null })
+        broadcastAuthChange('logout')
+        return false
+      }
+
+      set({ user, initialized: true, error: null })
+      return true
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unable to refresh your session'
+      // A temporary network failure must not behave like an explicit logout.
+      set({ error: message })
+      return false
+    }
   },
 
   register: async (email, name, password) => {
@@ -126,7 +193,6 @@ export const useAuthStore = create<AuthStore>((set) => ({
       }
 
       set({ user: null, initialized: true, loading: false })
-      persistUserToStorage(null)
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Failed to register'
       set({ error: message, loading: false })
@@ -153,7 +219,8 @@ export const useAuthStore = create<AuthStore>((set) => ({
       const user = toUser(userData)
 
       set({ user, initialized: true, loading: false })
-      persistUserToStorage(user)
+      clearLegacyAuthStorage()
+      broadcastAuthChange('login')
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Failed to login'
       set({ error: message, loading: false })
@@ -187,12 +254,19 @@ export const useAuthStore = create<AuthStore>((set) => ({
     try {
       set({ loading: true, error: null })
 
-      await fetch('/api/auth/logout', { method: 'POST' })
+      const response = await fetch('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'same-origin',
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to logout')
+      }
 
       localStorage.removeItem('webex_oauth_state')
-      persistUserToStorage(null)
-
+      clearLegacyAuthStorage()
       set({ user: null, initialized: true, loading: false })
+      broadcastAuthChange('logout')
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Failed to logout'
       set({ error: message, loading: false })
@@ -200,28 +274,8 @@ export const useAuthStore = create<AuthStore>((set) => ({
     }
   },
 
-  // OAuth resolves RBAC in its server callback. This request only transfers
-  // that already-signed session snapshot into client memory once.
-  completeExternalLogin: async () => {
-    try {
-      set({ loading: true, error: null })
-
-      const response = await fetch('/api/auth/me', { cache: 'no-store' })
-
-      if (!response.ok) {
-        throw new Error('Unable to complete login')
-      }
-
-      const userData = await response.json() as Record<string, unknown>
-      const user = toUser(userData)
-
-      set({ user, initialized: true, loading: false })
-      persistUserToStorage(user)
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unable to complete login'
-      set({ user: null, initialized: true, loading: false, error: message })
-      persistUserToStorage(null)
-      throw error
-    }
+  applyRemoteLogout: () => {
+    clearLegacyAuthStorage()
+    set({ user: null, initialized: true, loading: false, error: null })
   },
 }))

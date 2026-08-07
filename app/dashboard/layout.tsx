@@ -2,6 +2,7 @@
 
 import { ReactNode } from 'react'
 import Navigation from '@/components/Navigation'
+import ITTicketSuccessToast from '@/components/ITTicketSuccessToast'
 import { useRequireAuth } from '@/lib/useRequireAuth'
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
@@ -48,6 +49,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
       </div>
       <div className="relative z-10">
         <Navigation />
+        <ITTicketSuccessToast />
         <div className="relative z-10">
           <main className="ml-64 pt-8 px-gutter max-w-container">
             {children}

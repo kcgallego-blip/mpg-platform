@@ -1,7 +1,6 @@
 import { NextRequest } from 'next/server'
 import { getAuthCookieUser } from './authCookie'
 import { getSessionTokenCookie } from './sessionToken'
-import { supabase } from './supabase'
 
 export type AuthenticatedDbUser = {
   email: string
@@ -30,17 +29,7 @@ export async function getAuthenticatedDbUser(request: NextRequest): Promise<Auth
     }
   }
 
-  // Backward compatibility for sessions created before RBAC snapshots were
-  // introduced. A fresh login upgrades the session to the no-query path.
-  const { data: tokenUser, error: tokenError } = await supabase
-    .from('users')
-    .select('email, name, avatar_image, role, is_active')
-    .eq('token', sessionToken)
-    .maybeSingle()
-
-  if (!tokenError && tokenUser?.is_active === true) {
-    return tokenUser
-  }
-
+  // The signed snapshot carries the issued-at time used for the inactivity
+  // limit. A database token alone cannot prove when the browser was active.
   return null
 }

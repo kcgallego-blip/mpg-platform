@@ -77,22 +77,13 @@ function getNavItemsByRole(
     return [{ href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' }]
   }
 
-  switch (role) {
-    case 'Admin':
-      return withAttendance(allNavItems, true)
-    case 'IT':
-    case 'Operations Manager':
-    case 'Supervisor':
-    case 'Team Leader':
-      return withAttendance(managerNavItems, showAttendance)
-    case 'Agent':
-      return withAttendance(agentNavItems, showAttendance)
-    default:
-      return withAttendance(
-        [{ href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' }],
-        showAttendance
-      )
+  if (role === 'Admin') return withAttendance(allNavItems, true)
+  if (role.trim().toLowerCase() === 'agent') {
+    return withAttendance(agentNavItems, showAttendance)
   }
+
+  // Every assigned non-Agent role can submit and manage IT tickets.
+  return withAttendance(managerNavItems, showAttendance)
 }
 
 export default function Navigation() {

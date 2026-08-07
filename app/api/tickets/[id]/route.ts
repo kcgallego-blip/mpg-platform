@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase'
-import { NextResponse } from 'next/server'
+import { getAuthenticatedDbUser } from '@/lib/sessionAuth'
+import { NextRequest, NextResponse } from 'next/server'
 
 export async function GET(
   request: Request,
@@ -43,10 +44,18 @@ export async function GET(
 }
 
 export async function PATCH(
-  request: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const user = await getAuthenticatedDbUser(request)
+    if (!user?.is_active) {
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 })
+    }
+    if (!user.role?.trim() || user.role.trim().toLowerCase() === 'agent') {
+      return NextResponse.json({ error: 'Ticket management access denied' }, { status: 403 })
+    }
+
     const resolvedParams = await params
     const ticketId = resolvedParams.id
 
@@ -156,4 +165,3 @@ export async function POST(
     )
   }
 }
-

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, Suspense } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { useAuthStore } from '@/lib/authStore'
@@ -12,43 +12,23 @@ function LoginPageContent() {
   const searchParams = useSearchParams()
   const {
     user,
-    completeExternalLogin,
+    initialized,
+    initializeSession,
     loginWithEmail,
     loginWithWebex,
-    rehydrateFromStorage,
   } = useAuthStore()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
-  const [isCheckingAuth, setIsCheckingAuth] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showToast, setShowToast] = useState(false)
   const [toastMessage, setToastMessage] = useState('')
-  const hasCheckedAuth = useRef(false)
-
   useEffect(() => {
-    if (hasCheckedAuth.current) return
-
-    hasCheckedAuth.current = true
-
-    const initializeLogin = async () => {
-      try {
-        const storedUser = rehydrateFromStorage()
-        const isExternalLogin = searchParams.get('oauth') === 'success'
-
-        if (!storedUser && isExternalLogin) {
-          await completeExternalLogin()
-        }
-      } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : 'Unable to complete login')
-      } finally {
-        setIsCheckingAuth(false)
-      }
+    if (!initialized) {
+      void initializeSession()
     }
-
-    void initializeLogin()
-  }, [completeExternalLogin, rehydrateFromStorage, searchParams])
+  }, [initializeSession, initialized])
 
   useEffect(() => {
     const registeredParam = searchParams.get('registered')
@@ -62,10 +42,10 @@ function LoginPageContent() {
   }, [searchParams])
 
   useEffect(() => {
-    if (!isCheckingAuth && user) {
-      router.push('/dashboard')
+    if (initialized && user) {
+      router.replace('/dashboard')
     }
-  }, [user, isCheckingAuth, router])
+  }, [user, initialized, router])
 
   const handleLogin = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -100,7 +80,7 @@ function LoginPageContent() {
     }
   }
 
-  if (isCheckingAuth) {
+  if (!initialized || user) {
     return (
       <div className="w-full max-w-md">
         <div className="text-center mb-8">

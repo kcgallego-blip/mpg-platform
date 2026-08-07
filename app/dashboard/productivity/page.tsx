@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowDownUp, BarChart3, CalendarDays, Clock3, Loader2, RefreshCw, Table2, X } from 'lucide-react'
+import { ArrowDownUp, BarChart3, CalendarDays, Clock3, Download, Loader2, RefreshCw, Table2, X } from 'lucide-react'
 import { useAuthStore } from '@/lib/authStore'
 import { supabase } from '@/lib/supabase'
 import {
@@ -230,6 +230,7 @@ export default function ProductivityPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [isSorting, setIsSorting] = useState(false)
+  const [isDownloadingReport, setIsDownloadingReport] = useState(false)
   const [error, setError] = useState('')
   const [sortedAgentSummaries, setSortedAgentSummaries] = useState<SortedAgentSummary[]>([])
   const [selectedAgentEmail, setSelectedAgentEmail] = useState<string | null>(null)
@@ -448,6 +449,38 @@ export default function ProductivityPage() {
     }
   }, [selectedShiftDate, selectedStatus])
 
+  const downloadProductivityReport = useCallback(async () => {
+    try {
+      setIsDownloadingReport(true)
+      setError('')
+
+      const params = new URLSearchParams({ shiftDate: selectedShiftDate })
+      const response = await fetch(`/api/productivity/report?${params.toString()}`, {
+        cache: 'no-store',
+        credentials: 'include',
+      })
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as { error?: string } | null
+        throw new Error(payload?.error || 'Unable to generate productivity report')
+      }
+
+      const blob = await response.blob()
+      const objectUrl = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = objectUrl
+      anchor.download = `productivity-report-${selectedShiftDate}.pdf`
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      URL.revokeObjectURL(objectUrl)
+    } catch (err: any) {
+      setError(err.message || 'Unable to generate productivity report')
+    } finally {
+      setIsDownloadingReport(false)
+    }
+  }, [selectedShiftDate])
+
   const displayedProductivityRows = useMemo(() => {
     const sortedSummaryByEmail = new Map(sortedAgentSummaries.map((summary) => [summary.email, summary]))
     const rows = productivityRows.map((row) => {
@@ -522,6 +555,9 @@ export default function ProductivityPage() {
 
   const selectedAgent = displayedProductivityRows.find((row) => row.email === selectedAgentEmail)
   const sourceLabel = dataSource === 'tph' ? 'raw TPH rows' : 'TPH summary rows'
+  const canDownloadReport = ['Admin', 'Supervisor', 'Operations Manager', 'Team Leader'].includes(
+    user?.role || ''
+  )
 
   if (isLoading) {
     return (
@@ -630,6 +666,22 @@ export default function ProductivityPage() {
               <ArrowDownUp size={18} className={isSorting ? 'animate-pulse' : ''} />
               Sort
             </button>
+
+            {canDownloadReport && (
+              <button
+                type="button"
+                onClick={downloadProductivityReport}
+                disabled={isDownloadingReport}
+                className="flex min-h-11 items-center gap-2 rounded-lg border border-primary-container bg-surface px-4 py-2 text-sm font-bold text-primary-container shadow-sm transition hover:bg-primary-container/10 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {isDownloadingReport ? (
+                  <Loader2 size={18} className="animate-spin" />
+                ) : (
+                  <Download size={18} />
+                )}
+                {isDownloadingReport ? 'Generating…' : 'PDF Report'}
+              </button>
+            )}
           </div>
         </div>
 

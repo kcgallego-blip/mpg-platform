@@ -4,21 +4,18 @@ import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuthStore } from './authStore'
 
-/**
- * Hydrates the session snapshot once and performs a synchronous client guard.
- * Server APIs remain responsible for authoritative authorization.
- */
+/** Validates the shared HttpOnly-cookie session before rendering protected UI. */
 export function useRequireAuth() {
   const router = useRouter()
   const user = useAuthStore((state) => state.user)
   const initialized = useAuthStore((state) => state.initialized)
-  const rehydrateFromStorage = useAuthStore((state) => state.rehydrateFromStorage)
+  const initializeSession = useAuthStore((state) => state.initializeSession)
 
   useEffect(() => {
     if (!initialized) {
-      rehydrateFromStorage()
+      void initializeSession()
     }
-  }, [initialized, rehydrateFromStorage])
+  }, [initialized, initializeSession])
 
   useEffect(() => {
     if (initialized && !user) {

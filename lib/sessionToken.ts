@@ -2,7 +2,7 @@ import { randomBytes } from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 
 export const SESSION_COOKIE_NAME = 'mpg_session_token'
-const SESSION_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
+export const SESSION_IDLE_TIMEOUT_SECONDS = 60 * 60 * 24 * 3
 
 export function createSessionToken() {
   return randomBytes(48).toString('base64url')
@@ -14,7 +14,7 @@ export function setSessionTokenCookie(response: NextResponse, token: string) {
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
     path: '/',
-    maxAge: SESSION_COOKIE_MAX_AGE_SECONDS,
+    maxAge: SESSION_IDLE_TIMEOUT_SECONDS,
   })
 }
 

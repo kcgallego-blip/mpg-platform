@@ -1,4 +1,12 @@
 // Database type definitions for TypeScript
+export type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: Json | undefined }
+  | Json[]
+
 export interface Database {
   public: {
     Tables: {
@@ -137,6 +145,9 @@ export interface Database {
           onsite: boolean | null
           affected_five9: boolean | null
           webex_message_id: string | null
+          history: Json
+          notes: Json
+          reported: boolean
           created_at: string
           updated_at: string
         }
@@ -155,6 +166,9 @@ export interface Database {
           onsite?: boolean | null
           affected_five9?: boolean | null
           webex_message_id?: string | null
+          history?: Json
+          notes?: Json
+          reported?: boolean
           created_at?: string
           updated_at?: string
         }
@@ -173,6 +187,9 @@ export interface Database {
           onsite?: boolean | null
           affected_five9?: boolean | null
           webex_message_id?: string | null
+          history?: Json
+          notes?: Json
+          reported?: boolean
           updated_at?: string
         }
       }

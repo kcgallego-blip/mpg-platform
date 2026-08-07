@@ -1,8 +1,8 @@
 import { createHmac, timingSafeEqual } from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
+import { SESSION_IDLE_TIMEOUT_SECONDS } from './sessionToken'
 
 export const AUTH_COOKIE_NAME = 'webex_auth'
-const AUTH_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
 
 type AuthCookiePayload = {
   email: string
@@ -68,8 +68,15 @@ function verifyPayload(value: string, sessionToken: string): AuthCookiePayload |
 
   try {
     const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as AuthCookiePayload
+    const now = Math.floor(Date.now() / 1000)
 
-    if (!payload.email || typeof payload.exp !== 'number' || payload.exp < Math.floor(Date.now() / 1000)) {
+    if (
+      !payload.email ||
+      typeof payload.iat !== 'number' ||
+      typeof payload.exp !== 'number' ||
+      payload.exp <= now ||
+      payload.iat + SESSION_IDLE_TIMEOUT_SECONDS <= now
+    ) {
       return null
     }
 
@@ -85,7 +92,7 @@ export function signAuthCookie(user: AuthenticatedUser, sessionToken: string) {
   return signPayload({
     ...user,
     iat: now,
-    exp: now + AUTH_COOKIE_MAX_AGE_SECONDS,
+    exp: now + SESSION_IDLE_TIMEOUT_SECONDS,
   }, sessionToken)
 }
 
@@ -107,7 +114,7 @@ export function setAuthCookie(
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
     path: '/',
-    maxAge: AUTH_COOKIE_MAX_AGE_SECONDS,
+    maxAge: SESSION_IDLE_TIMEOUT_SECONDS,
   })
 }
 

@@ -1,9 +1,12 @@
 'use client'
 
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { Send, Loader2, Users, X, Plus, Trash2 } from 'lucide-react'
+import { Send, Loader2, Users, X } from 'lucide-react'
+import { showITTicketSuccessToast } from '@/components/ITTicketSuccessToast'
 import { createTicket, getAllAgentsWithSettings } from '@/lib/db'
+import { createSubmissionHistory, type TicketHistoryEntry } from '@/lib/ticketAudit'
+import { useAuthStore } from '@/lib/authStore'
 
 type AgentWorkSetting = string | null | undefined
 type AgentOption = {
@@ -11,14 +14,14 @@ type AgentOption = {
   setting: AgentWorkSetting
 }
 
+type SubmissionMode = 'single' | 'batch'
+
 type TicketItem = {
-  id: string
   agentNames: string[]
   category: string
   concern: string
   startTime: string
   startAmPm: 'AM' | 'PM'
-  isOnsite: boolean
   affectsFive9: boolean
 }
 
@@ -29,6 +32,7 @@ type TicketPayload = {
   concern: string
   date: string
   start_time: string
+  name: string
   onsite: boolean
   affected_five9: boolean
   webex_message_id: null
@@ -36,6 +40,8 @@ type TicketPayload = {
   troubleshooting: null
   assisted_by: null
   status: string
+  history: TicketHistoryEntry[]
+  notes: []
 }
 
 const categories = [
@@ -57,56 +63,47 @@ function createEmptyTicketItem(): TicketItem {
   hours = hours ? hours : 12
 
   return {
-    id: crypto.randomUUID(),
     agentNames: [],
     category: '',
     concern: '',
     startTime: `${hours.toString().padStart(2, '0')}:${minutes}`,
     startAmPm: ampm as 'AM' | 'PM',
-    isOnsite: false,
     affectsFive9: false,
   }
 }
 
-function buildTicketData(item: TicketItem, now = new Date()): TicketPayload {
+function convertTo24Hour(time: string, amPm: TicketItem['startAmPm']) {
+  const [hourValue, minute] = time.trim().split(':')
+  let hour = Number(hourValue)
+
+  if (amPm === 'PM' && hour !== 12) hour += 12
+  if (amPm === 'AM' && hour === 12) hour = 0
+
+  return `${hour.toString().padStart(2, '0')}:${minute}`
+}
+
+function buildTicketData(
+  item: TicketItem,
+  affectedAgent: string,
+  submittedBy: string,
+  now = new Date()
+): TicketPayload {
   return {
     category: item.category,
     concern: item.concern.trim(),
     date: now.toISOString().split('T')[0],
-    start_time: item.startTime,
-    onsite: item.isOnsite,
+    start_time: convertTo24Hour(item.startTime, item.startAmPm),
+    name: affectedAgent,
+    onsite: true,
     affected_five9: item.affectsFive9,
     webex_message_id: null,
     end_time: null,
     troubleshooting: null,
     assisted_by: null,
     status: 'Open',
+    history: createSubmissionHistory(submittedBy, now.toISOString()),
+    notes: [],
   }
-}
-
-function buildBatchConcern(items: TicketItem[], now: Date) {
-  return JSON.stringify(
-    {
-      mode: 'batch',
-      submittedAt: now.toISOString(),
-      itemCount: items.length,
-      items: items.map((item) => ({
-        agentNames: item.agentNames,
-        category: item.category,
-        concern: item.concern.trim(),
-        start_time: item.startTime,
-        start_am_pm: item.startAmPm,
-        isOnsite: item.isOnsite,
-        affectsFive9: item.affectsFive9,
-      })),
-    },
-    null,
-    2
-  )
-}
-
-function isWfhAgent(agent: AgentOption) {
-  return !agent.setting || agent.setting.trim() === ''
 }
 
 function getAgentSettingLabel(setting: AgentWorkSetting) {
@@ -120,98 +117,108 @@ function getAgentSettingClass(setting: AgentWorkSetting) {
 }
 
 function isValidTime(value: string) {
-  return /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(value.trim())
+  return /^(0?[1-9]|1[0-2]):[0-5][0-9]$/.test(value.trim())
 }
 
-function isInvalidTicketItem(item: TicketItem) {
-  return (
-    item.agentNames.length === 0 ||
-    item.category.trim().length === 0 ||
-    item.concern.trim().length === 0 ||
-    !isValidTime(item.startTime)
-  )
-}
+function ModeSelector({
+  value,
+  onChange,
+}: {
+  value: SubmissionMode
+  onChange: (mode: SubmissionMode) => void
+}) {
+  const modes: Array<{
+    value: SubmissionMode
+    label: string
+    description: string
+    output: string
+  }> = [
+    {
+      value: 'single',
+      label: 'Single Submission',
+      description: 'Report one issue affecting one or more agents.',
+      output: 'Creates one ticket row per selected agent.',
+    },
+    {
+      value: 'batch',
+      label: 'Batch Report',
+      description: 'Report one shared issue affecting at least two agents.',
+      output: 'Creates one combined ticket row.',
+    },
+  ]
 
-function ModeToggle({ enabled, onToggle }: { enabled: boolean; onToggle: () => void }) {
   return (
-    <div className="rounded-lg border border-outline-variant/50 bg-surface-container-low/40 p-4">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="font-hanken text-label-md font-semibold text-on-surface">
-            Submission Mode
-          </h2>
-          <p className="mt-1 text-on-surface-variant text-sm">
-            {enabled
-              ? 'Batch reporting saves all report items below as one JSON payload row.'
-              : 'Single mode creates one ticket row for each selected agent.'}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-pressed={enabled}
-          className={`relative inline-flex h-8 w-16 shrink-0 items-center rounded-full transition-colors ${
-            enabled ? 'bg-primary-container' : 'bg-surface-container-high'
-          }`}
-        >
-          <span
-            className={`inline-block h-6 w-6 transform rounded-full bg-on-primary shadow transition-transform ${
-              enabled ? 'translate-x-9' : 'translate-x-1'
-            }`}
-          />
-        </button>
+    <fieldset>
+      <legend className="mb-3 font-hanken text-label-md font-semibold text-on-surface">
+        Submission Mode
+      </legend>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {modes.map((mode) => {
+          const selected = value === mode.value
+
+          return (
+            <button
+              key={mode.value}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              onClick={() => onChange(mode.value)}
+              className={`rounded-xl border p-4 text-left transition-all ${
+                selected
+                  ? 'border-primary bg-primary-container/15 ring-2 ring-primary/15'
+                  : 'border-outline-variant/50 bg-surface-container-low/30 hover:border-primary/50 hover:bg-surface-container-low'
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <span
+                  className={`h-3 w-3 rounded-full border ${
+                    selected
+                      ? 'border-primary bg-primary ring-2 ring-primary/20'
+                      : 'border-outline'
+                  }`}
+                />
+                <span className="font-hanken font-semibold text-on-surface">
+                  {mode.label}
+                </span>
+              </span>
+              <span className="mt-3 block text-sm text-on-surface-variant">
+                {mode.description}
+              </span>
+              <span className="mt-2 block text-xs font-medium text-primary">
+                {mode.output}
+              </span>
+            </button>
+          )
+        })}
       </div>
-      <div className="mt-3 flex flex-wrap gap-2 text-sm">
-        <span
-          className={`rounded-full border px-3 py-1 ${
-            !enabled
-              ? 'border-primary/50 bg-primary-container/20 text-primary'
-              : 'border-outline-variant/50 text-on-surface-variant'
-          }`}
-        >
-          Single Submission Mode
-        </span>
-        <span
-          className={`rounded-full border px-3 py-1 ${
-            enabled
-              ? 'border-primary/50 bg-primary-container/20 text-primary'
-              : 'border-outline-variant/50 text-on-surface-variant'
-          }`}
-        >
-          Batch Report
-        </span>
-      </div>
-    </div>
+    </fieldset>
   )
 }
 
 function AgentSelector({
   item,
-  itemLabel,
+  minimumAgents,
   allAgents,
   loadingAgents,
-  onsiteAgents,
-  wfhAgents,
   onItemChange,
 }: {
   item: TicketItem
-  itemLabel: string
+  minimumAgents: number
   allAgents: AgentOption[]
   loadingAgents: boolean
-  onsiteAgents: AgentOption[]
-  wfhAgents: AgentOption[]
   onItemChange: (field: keyof TicketItem, value: TicketFieldValue) => void
 }) {
   const [searchTerm, setSearchTerm] = useState('')
   const [showDropdown, setShowDropdown] = useState(false)
+  const dropdownRef = useRef<HTMLDivElement>(null)
 
-  const dropdownRef = useCallback((node: HTMLDivElement | null) => {
-    if (node === null) return
+  useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (!node.contains(event.target as Node)) {
+      if (!dropdownRef.current?.contains(event.target as Node)) {
         setShowDropdown(false)
       }
     }
+
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
@@ -242,17 +249,6 @@ function AgentSelector({
     )
   }
 
-  const selectAgents = (agents: AgentOption[]) => {
-    if (agents.length === 0) return
-
-    onItemChange(
-      'agentNames',
-      Array.from(new Set([...item.agentNames, ...agents.map((agent) => agent.name)]))
-    )
-    setSearchTerm('')
-    setShowDropdown(false)
-  }
-
   const handleChange = (field: keyof TicketItem, value: TicketFieldValue) => {
     onItemChange(field, value)
   }
@@ -262,12 +258,14 @@ function AgentSelector({
       <div className="flex items-start justify-between gap-3">
         <div>
           <h3 className="font-hanken text-label-md font-semibold text-on-surface">
-            {itemLabel}
+            Affected Agents
           </h3>
           <p className="text-on-surface-variant text-sm">
             {item.agentNames.length === 0
-              ? 'Select at least one agent for this report item.'
-              : `${item.agentNames.length} agent${item.agentNames.length === 1 ? '' : 's'} selected.`}
+              ? `Select at least ${minimumAgents === 1 ? 'one agent' : `${minimumAgents} agents`}.`
+              : item.agentNames.length < minimumAgents
+                ? `Select ${minimumAgents - item.agentNames.length} more agent${minimumAgents - item.agentNames.length === 1 ? '' : 's'} to submit this batch.`
+                : `${item.agentNames.length} agent${item.agentNames.length === 1 ? '' : 's'} selected.`}
           </p>
         </div>
         {item.agentNames.length > 0 && (
@@ -302,25 +300,6 @@ function AgentSelector({
           </div>
         )}
 
-        <div className="flex flex-wrap gap-2 mb-3">
-          <button
-            type="button"
-            onClick={() => selectAgents(onsiteAgents)}
-            disabled={onsiteAgents.length === 0}
-            className="rounded-lg border border-primary/40 bg-primary-container/15 px-3 py-2 text-sm font-medium text-primary transition-all disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Select All Onsite Agents ({onsiteAgents.length})
-          </button>
-          <button
-            type="button"
-            onClick={() => selectAgents(wfhAgents)}
-            disabled={wfhAgents.length === 0}
-            className="rounded-lg border border-outline-variant/60 bg-surface-container-high px-3 py-2 text-sm font-medium text-on-surface transition-all hover:bg-surface-container hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Select All WFH Agents ({wfhAgents.length})
-          </button>
-        </div>
-
         {loadingAgents ? (
           <div className="w-full px-4 py-3 rounded-lg bg-surface-container-low/50 flex items-center justify-center gap-2">
             <Loader2 size={18} className="animate-spin text-primary" />
@@ -336,6 +315,8 @@ function AgentSelector({
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               onFocus={() => setShowDropdown(true)}
+              aria-expanded={showDropdown}
+              aria-haspopup="listbox"
               placeholder="Search agents..."
               className="w-full pl-10 pr-4 py-3 rounded-lg bg-surface-container-low/50 border border-outline-variant/50 text-on-surface focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
             />
@@ -431,49 +412,29 @@ function AgentSelector({
         />
       </div>
 
-      <div className="space-y-4">
-        <label className="flex items-start gap-3 cursor-pointer group">
-          <input
-            type="checkbox"
-            checked={item.isOnsite}
-            onChange={(e) => handleChange('isOnsite', e.target.checked)}
-            className="w-5 h-5 mt-0.5 rounded border-outline-variant/50 text-primary focus:ring-2 focus:ring-primary/20 transition-all"
-          />
-          <span className="text-on-surface group-hover:text-primary transition-colors">
-            Agent is onsite (uncheck if WFH)
-          </span>
-        </label>
-
-        <label className="flex items-start gap-3 cursor-pointer group">
-          <input
-            type="checkbox"
-            checked={item.affectsFive9}
-            onChange={(e) => handleChange('affectsFive9', e.target.checked)}
-            className="w-5 h-5 mt-0.5 rounded border-outline-variant/50 text-primary focus:ring-2 focus:ring-primary/20 transition-all"
-          />
-          <span className="text-on-surface group-hover:text-primary transition-colors">
-            Is the issue affecting the agent's Five9 login hours?
-          </span>
-        </label>
-      </div>
+      <label className="flex items-start gap-3 cursor-pointer group">
+        <input
+          type="checkbox"
+          checked={item.affectsFive9}
+          onChange={(e) => handleChange('affectsFive9', e.target.checked)}
+          className="w-5 h-5 mt-0.5 rounded border-outline-variant/50 text-primary focus:ring-2 focus:ring-primary/20 transition-all"
+        />
+        <span className="text-on-surface group-hover:text-primary transition-colors">
+          Is the issue affecting the agent's Five9 login hours?
+        </span>
+      </label>
     </div>
   )
 }
 
 export default function ITReportPage() {
   const router = useRouter()
-  const [batchReporting, setBatchReporting] = useState(false)
+  const user = useAuthStore((state) => state.user)
+  const [submissionMode, setSubmissionMode] = useState<SubmissionMode>('single')
   const [formData, setFormData] = useState<TicketItem>(() => createEmptyTicketItem())
-  const [batchItems, setBatchItems] = useState<TicketItem[]>([])
   const [allAgents, setAllAgents] = useState<AgentOption[]>([])
   const [loading, setLoading] = useState(false)
   const [loadingAgents, setLoadingAgents] = useState(true)
-
-  const onsiteAgents = useMemo(
-    () => allAgents.filter((agent) => agent.setting === 'O'),
-    [allAgents]
-  )
-  const wfhAgents = useMemo(() => allAgents.filter(isWfhAgent), [allAgents])
 
   useEffect(() => {
     async function fetchAgents() {
@@ -494,39 +455,33 @@ export default function ITReportPage() {
     setFormData((prev) => ({ ...prev, [field]: value } as TicketItem))
   }
 
-  const handleBatchItemChange = (
-    itemId: string,
-    field: keyof TicketItem,
-    value: TicketFieldValue
-  ) => {
-    setBatchItems((prev) =>
-      prev.map((item) =>
-        item.id === itemId ? ({ ...item, [field]: value } as TicketItem) : item
-      )
-    )
-  }
-
-  const addBatchItem = () => {
-    setBatchItems((prev) => [...prev, createEmptyTicketItem()])
-  }
-
-  const removeBatchItem = (itemId: string) => {
-    setBatchItems((prev) => prev.filter((item) => item.id !== itemId))
-  }
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    const minimumAgents = submissionMode === 'batch' ? 2 : 1
 
-    const itemsToSubmit = batchReporting ? [formData, ...batchItems] : [formData]
-    const invalidItems = itemsToSubmit.filter(isInvalidTicketItem)
-
-    if (invalidItems.length > 0) {
-      const invalidItemNumbers = invalidItems
-        .map((_, index) => index + 1)
-        .join(', ')
+    if (formData.agentNames.length < minimumAgents) {
       alert(
-        `Please complete all required fields for Report Item ${invalidItemNumbers}.`
+        submissionMode === 'batch'
+          ? 'Please select at least two agents for a batch report.'
+          : 'Please select at least one agent.'
       )
+      return
+    }
+
+    const validationErrors: string[] = []
+
+    if (!formData.category.trim()) {
+      validationErrors.push('select an issue category')
+    }
+    if (!formData.concern.trim()) {
+      validationErrors.push('enter detailed notes')
+    }
+    if (!isValidTime(formData.startTime)) {
+      validationErrors.push('enter a valid start time in HH:MM format')
+    }
+
+    if (validationErrors.length > 0) {
+      alert(`Please ${validationErrors.join(', and ')}.`)
       return
     }
 
@@ -534,59 +489,35 @@ export default function ITReportPage() {
 
     try {
       const now = new Date()
+      const submittedBy = user?.name?.trim() || user?.email?.trim()
+      if (!submittedBy) {
+        throw new Error('Unable to identify the logged-in user. Please sign in again.')
+      }
       const createdTickets: Awaited<ReturnType<typeof createTicket>>[] = []
 
-      if (batchReporting) {
-        const batchTicket = {
-          ...buildTicketData(formData, now),
-          name: 'Batch Report',
-          category: 'Batch',
-          concern: buildBatchConcern(itemsToSubmit, now),
-        }
+      if (submissionMode === 'batch') {
+        const batchTicket = buildTicketData(
+          formData,
+          formData.agentNames.join(', '),
+          submittedBy,
+          now
+        )
 
         console.log('Submitting batch ticket data:', batchTicket)
         createdTickets.push(await createTicket(batchTicket))
       } else {
-        const ticketData = buildTicketData(formData, now)
-
         for (const agentName of formData.agentNames) {
-          const ticket = { ...ticketData, name: agentName }
+          const ticket = buildTicketData(formData, agentName, submittedBy, now)
           console.log('Submitting ticket data:', ticket)
           createdTickets.push(await createTicket(ticket))
         }
       }
 
-      const webhookUrl = process.env.NEXT_PUBLIC_WEBHOOK_URL
-      if (webhookUrl) {
-        for (const result of createdTickets) {
-          try {
-            const ticketId = result.ticketid
-            const webhookEndpoint = `${webhookUrl}/api/ticket/message?id=${ticketId}`
-            console.log('Calling webhook:', webhookEndpoint)
-
-            const response = await fetch(webhookEndpoint, {
-              method: 'GET',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-            })
-
-            if (response.ok) {
-              console.log('Webhook called successfully')
-            } else {
-              console.warn('Webhook returned non-ok status:', response.status)
-            }
-          } catch (webhookError) {
-            console.error('Webhook call failed:', webhookError)
-          }
-        }
-      } else {
-        console.warn('WEBHOOK_URL environment variable not set')
-      }
-
       const reportLabel = createdTickets.length === 1 ? 'IT Report' : 'IT Reports'
-      alert(`${createdTickets.length} ${reportLabel} submitted successfully!`)
-      router.push('/dashboard')
+      showITTicketSuccessToast(
+        `${createdTickets.length} ${reportLabel} submitted successfully.`
+      )
+      router.push('/dashboard/it/ticket-reports')
     } catch (error: any) {
       console.error('Error creating ticket:', error)
       console.error('Error details:', JSON.stringify(error, null, 2))
@@ -608,90 +539,19 @@ export default function ITReportPage() {
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-8">
-        <ModeToggle
-          enabled={batchReporting}
-          onToggle={() => setBatchReporting((prev) => !prev)}
+        <ModeSelector
+          value={submissionMode}
+          onChange={setSubmissionMode}
         />
 
         <div className="space-y-8">
           <AgentSelector
             item={formData}
-            itemLabel="Report Item 1"
+            minimumAgents={submissionMode === 'batch' ? 2 : 1}
             allAgents={allAgents}
             loadingAgents={loadingAgents}
-            onsiteAgents={onsiteAgents}
-            wfhAgents={wfhAgents}
             onItemChange={handleItemChange}
           />
-
-          {batchReporting && (
-            <section className="space-y-4">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <h2 className="font-hanken text-label-md font-semibold text-on-surface">
-                    Additional Report Items
-                  </h2>
-                  <p className="text-on-surface-variant text-sm">
-                    Add more issues here. They will be saved together in one batch row.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={addBatchItem}
-                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary-container px-4 py-2 text-sm font-medium text-on-primary transition-all hover:shadow-lg hover:shadow-primary-container/30"
-                >
-                  <Plus size={16} />
-                  Add Report Item
-                </button>
-              </div>
-
-              <div className="space-y-6">
-                {batchItems.map((item, index) => (
-                  <div
-                    key={item.id}
-                    className="rounded-xl border border-outline-variant/50 bg-surface-container-low/30 p-4 sm:p-5"
-                  >
-                    <div className="mb-4 flex items-start justify-between gap-3">
-                      <div>
-                        <h3 className="font-hanken text-label-md font-semibold text-on-surface">
-                          Report Item {index + 2}
-                        </h3>
-                        <p className="text-on-surface-variant text-sm">
-                          Configure another issue to include in this batch.
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => removeBatchItem(item.id)}
-                        className="rounded-lg p-2 text-error transition-colors hover:bg-error/10"
-                        aria-label={`Remove Report Item ${index + 2}`}
-                      >
-                        <Trash2 size={18} />
-                      </button>
-                    </div>
-
-                    <AgentSelector
-                      item={item}
-                      itemLabel={`Report Item ${index + 2}`}
-                      allAgents={allAgents}
-                      loadingAgents={loadingAgents}
-                      onsiteAgents={onsiteAgents}
-                      wfhAgents={wfhAgents}
-                      onItemChange={(field, value) =>
-                        handleBatchItemChange(item.id, field, value)
-                      }
-                    />
-                  </div>
-                ))}
-
-                {batchItems.length === 0 && (
-                  <div className="rounded-lg border border-dashed border-outline-variant/60 p-4 text-center text-on-surface-variant">
-                    No additional report items yet. Add one if you need multiple issues in this batch.
-                  </div>
-                )}
-              </div>
-            </section>
-          )}
         </div>
 
         <div className="flex gap-4">
@@ -713,10 +573,15 @@ export default function ITReportPage() {
             ) : (
               <Send size={20} />
             )}
-            {loading ? 'Submitting...' : batchReporting ? 'Submit Batch Report' : 'Submit Report'}
+            {loading
+              ? 'Submitting...'
+              : submissionMode === 'batch'
+                ? 'Submit Batch Report'
+                : 'Submit Report'}
           </button>
         </div>
       </form>
+
     </div>
   )
 }

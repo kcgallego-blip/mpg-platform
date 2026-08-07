@@ -1,48 +1,41 @@
 'use client'
 
-import { useState, useEffect, useMemo, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
+import Link from 'next/link'
 import {
-  Search,
-  Filter,
+  AlertCircle,
   Calendar,
-  ChevronUp,
-  ChevronDown,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  RefreshCw,
-  Users,
-  User,
-  Tag,
-  Building2,
-  Phone,
-  X,
+  CircleDot,
   Clock,
+  History,
+  Loader2,
+  MessageSquarePlus,
+  PauseCircle,
+  RefreshCw,
+  Search,
+  Send,
+  Tag,
+  Trash2,
   Wrench,
-  Save,
-  Edit3,
+  X,
 } from 'lucide-react'
-import { getTickets, getFive9LogoutIssues, updateTicket, formatDate } from '@/lib/db'
+import { deleteOpenTicket, formatDate, getFive9LogoutIssues, getTickets, runTicketWorkflow } from '@/lib/db'
+import type { TicketWorkflowRequest } from '@/lib/db'
+import type { Database } from '@/lib/supabase'
+import { useAuthStore } from '@/lib/authStore'
+import {
+  formatAuditTimestamp,
+  normalizeTicketStatus,
+  parseTicketHistory,
+  parseTicketNotes,
+  type TicketStatus,
+} from '@/lib/ticketAudit'
 
-type Ticket = {
-  ticketid: number
-  category: string | null
-  concern: string | null
-  date: string | null
-  start_time: string | null
-  name: string | null
-  team_leader: string | null
-  onsite: boolean | null
-  affected_five9: boolean | null
-  webex_message_id: string | null
-  end_time: string | null
-  troubleshooting: string | null
-  assisted_by: string | null
-  status: string | null
-  created_at: string
-  updated_at: string
-}
-
+type Ticket = Database['public']['Tables']['tickets']['Row']
 type Five9Logout = {
   id: string
   name: string | null
@@ -50,1092 +43,615 @@ type Five9Logout = {
   end_time: string | null
   created_at: string
 }
-
 type ViewMode = 'it-issues' | 'five9-logouts'
+type StatusFilter = TicketStatus | 'All'
 
-type SortColumn = 'status' | 'date' | 'team_leader' | 'name' | 'category' | 'concern' | 'start_time' | 'end_time' | 'troubleshooting' | 'onsite' | 'affected_five9' | 'assisted_by'
-type SortDirection = 'asc' | 'desc'
+const IT_STAFF = [
+  'Kevin Christopher Gallego',
+  'Efraim Herald Malbas',
+  'John Melmar Losauro',
+] as const
 
-// Format time as HH:MM (without seconds)
-function formatTime(timeStr: string | null): string {
-  if (!timeStr) return '-'
-  if (/^\d{2}:\d{2}$/.test(timeStr)) return timeStr
-  const match = timeStr.match(/^(\d{2}:\d{2})/)
-  return match ? match[1] : timeStr
+const STATUS_TABS: Array<{ value: StatusFilter; icon: typeof CircleDot }> = [
+  { value: 'Open', icon: CircleDot },
+  { value: 'Pending', icon: PauseCircle },
+  { value: 'Solved', icon: CheckCircle2 },
+  { value: 'All', icon: History },
+]
+const PAGE_SIZE = 12
+
+function formatTime(time: string | null): string {
+  if (!time) return '—'
+  const match = time.match(/^(\d{1,2}):(\d{2})/)
+  if (!match) return time
+
+  const hour = Number(match[1])
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23) return time
+
+  const period = hour >= 12 ? 'PM' : 'AM'
+  const displayHour = hour % 12 || 12
+  return `${displayHour.toString().padStart(2, '0')}:${match[2]} ${period}`
 }
 
-// Parse time string to ensure HH:MM format
-function parseTime(value: string): string {
-  const cleaned = value.replace(/[^\d:]/g, '')
-  const match = cleaned.match(/^(\d{1,2}):(\d{1,2})/)
-  if (match) {
-    const hours = parseInt(match[1]).toString().padStart(2, '0')
-    const minutes = parseInt(match[2]).toString().padStart(2, '0')
-    return `${hours}:${minutes}`
-  }
-  return value
+function statusClass(status: TicketStatus): string {
+  if (status === 'Open') return 'bg-error/15 text-error'
+  if (status === 'Pending') return 'bg-primary-container/25 text-primary'
+  return 'bg-success/15 text-success'
 }
 
-// Convert 24-hour time to 12-hour format with AM/PM
-function convertTo12Hour(timeStr: string | null): { hour: string; minute: string; ampm: string } {
-  if (!timeStr || !/^\d{2}:\d{2}$/.test(timeStr)) {
-    const now = new Date()
-    const hour = now.getHours()
-    const minute = now.getMinutes()
-    return convertHourMinuteTo12Hour(hour, minute)
-  }
-  const [hourStr, minuteStr] = timeStr.split(':')
-  const hour = parseInt(hourStr)
-  const minute = parseInt(minuteStr)
-  return convertHourMinuteTo12Hour(hour, minute)
+function StatusBadge({ status }: { status: string | null }) {
+  const value = normalizeTicketStatus(status)
+  return (
+    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusClass(value)}`}>
+      {value}
+    </span>
+  )
 }
 
-function convertHourMinuteTo12Hour(hour: number, minute: number): { hour: string; minute: string; ampm: string } {
-  const ampm = hour >= 12 ? 'PM' : 'AM'
-  const hour12 = hour % 12 || 12
-  return {
-    hour: hour12.toString().padStart(2, '0'),
-    minute: minute.toString().padStart(2, '0'),
-    ampm
-  }
+function Detail({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div>
+      <dt className="text-xs font-semibold uppercase tracking-wide text-on-surface-variant">{label}</dt>
+      <dd className="mt-1 text-sm text-on-surface">{value || '—'}</dd>
+    </div>
+  )
 }
 
-// Convert 12-hour format with AM/PM to 24-hour HH:MM
-function convertTo24Hour(hour: string, minute: string, ampm: string): string {
-  let hour24 = parseInt(hour)
-  if (ampm === 'PM' && hour24 !== 12) hour24 += 12
-  if (ampm === 'AM' && hour24 === 12) hour24 = 0
-  return `${hour24.toString().padStart(2, '0')}:${minute.padStart(2, '0')}`
+function HistoryPanel({ ticket }: { ticket: Ticket }) {
+  const entries = parseTicketHistory(ticket.history)
+  return (
+    <section className="rounded-xl border border-outline-variant/30 bg-surface-container-low/35 p-5">
+      <div className="mb-4 flex items-center gap-2">
+        <History size={18} className="text-primary" />
+        <h3 className="font-hanken font-semibold text-on-surface">History</h3>
+        <span className="ml-auto rounded-full bg-surface-container-high px-2 py-0.5 text-xs text-on-surface-variant">
+          {entries.length}
+        </span>
+      </div>
+      {entries.length === 0 ? (
+        <p className="text-sm text-on-surface-variant">No history entries are available.</p>
+      ) : (
+        <ol>
+          {entries.map((entry, index) => (
+            <li key={`${entry.timestamp}-${index}`} className="relative flex gap-3 pb-5 last:pb-0">
+              {index < entries.length - 1 && (
+                <span className="absolute left-[5px] top-3 h-full w-px bg-outline-variant/50" />
+              )}
+              <span className="relative mt-1.5 h-3 w-3 shrink-0 rounded-full border-2 border-primary bg-surface" />
+              <div className="min-w-0">
+                <p className="text-sm leading-5 text-on-surface">{entry.action}</p>
+                <p className="mt-1 text-xs text-on-surface-variant">
+                  {entry.actor} · {formatAuditTimestamp(entry.timestamp)}
+                </p>
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  )
+}
+
+function NotesPanel({
+  ticket,
+  noteText,
+  saving,
+  onChange,
+  onSave,
+}: {
+  ticket: Ticket
+  noteText: string
+  saving: boolean
+  onChange: (value: string) => void
+  onSave: () => void
+}) {
+  const notes = parseTicketNotes(ticket.notes)
+  const canAdd = normalizeTicketStatus(ticket.status) !== 'Solved'
+  return (
+    <section className="rounded-xl border border-outline-variant/30 bg-surface-container-low/35 p-5">
+      <div className="mb-4 flex items-center gap-2">
+        <MessageSquarePlus size={18} className="text-primary" />
+        <h3 className="font-hanken font-semibold text-on-surface">Ticket Notes</h3>
+        <span className="ml-auto rounded-full bg-surface-container-high px-2 py-0.5 text-xs text-on-surface-variant">
+          {notes.length}
+        </span>
+      </div>
+      {canAdd ? (
+        <div className="mb-5 space-y-2">
+          <label htmlFor="ticket-note" className="text-sm font-medium text-on-surface">Add a note</label>
+          <textarea
+            id="ticket-note"
+            value={noteText}
+            onChange={(event) => onChange(event.target.value)}
+            rows={3}
+            maxLength={4000}
+            placeholder="Add an internal update or observation..."
+            className="w-full resize-y rounded-lg border border-outline-variant/50 bg-surface px-3 py-2 text-sm text-on-surface outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+          />
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-xs text-on-surface-variant">Author and timestamp are automatic.</span>
+            <button
+              type="button"
+              onClick={onSave}
+              disabled={saving || !noteText.trim()}
+              className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-on-primary disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {saving ? <Loader2 size={16} className="animate-spin" /> : <MessageSquarePlus size={16} />}
+              Save note
+            </button>
+          </div>
+        </div>
+      ) : (
+        <p className="mb-4 rounded-lg bg-surface-container-high/70 p-3 text-sm text-on-surface-variant">
+          This ticket is solved and cannot accept new notes.
+        </p>
+      )}
+      {notes.length === 0 ? (
+        <p className="text-sm text-on-surface-variant">No notes have been added.</p>
+      ) : (
+        <div className="space-y-3">
+          {[...notes].reverse().map((note, index) => (
+            <article key={`${note.timestamp}-${index}`} className="rounded-lg bg-surface p-3">
+              <p className="whitespace-pre-wrap text-sm leading-5 text-on-surface">{note.note}</p>
+              <p className="mt-2 text-xs text-on-surface-variant">
+                {note.author} · {formatAuditTimestamp(note.timestamp)}
+              </p>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  )
 }
 
 export default function ITReportsPage() {
-  const router = useRouter()
+  const user = useAuthStore((state) => state.user)
+  const canManageTickets = Boolean(
+    user?.role?.trim() && user.role.trim().toLowerCase() !== 'agent'
+  )
   const [viewMode, setViewMode] = useState<ViewMode>('it-issues')
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [five9Logouts, setFive9Logouts] = useState<Five9Logout[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [savingTicket, setSavingTicket] = useState<number | null>(null)
-
-  // Filters
+  const [activeStatus, setActiveStatus] = useState<StatusFilter>('Open')
+  const [searchQuery, setSearchQuery] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
-  const [searchField, setSearchField] = useState<SortColumn | ''>('')
-  const [searchQuery, setSearchQuery] = useState('')
-
-  // Sorting
-  const [sortColumn, setSortColumn] = useState<SortColumn>('date')
-  const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
-
-  // Pagination
   const [currentPage, setCurrentPage] = useState(1)
-  const itemsPerPage = 10
-
-  // Editable fields state
-  const [editingEndTime, setEditingEndTime] = useState<number | null>(null)
-  const [editingTroubleshooting, setEditingTroubleshooting] = useState<number | null>(null)
-  const [editingAssistedBy, setEditingAssistedBy] = useState<number | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null)
-  const [troubleshootingTicket, setTroubleshootingTicket] = useState<Ticket | null>(null)
-  const [showFinalizeConfirm, setShowFinalizeConfirm] = useState(false)
-  const [tempEndTime, setTempEndTime] = useState('')
-  const [tempTroubleshooting, setTempTroubleshooting] = useState('')
-  const [tempAssistedBy, setTempAssistedBy] = useState('')
-  const [tempEndTimeHour, setTempEndTimeHour] = useState('')
-  const [tempEndTimeMinute, setTempEndTimeMinute] = useState('')
-  const [tempEndTimeAMPM, setTempEndTimeAMPM] = useState<'AM' | 'PM'>('AM')
+  const [assistantOption, setAssistantOption] = useState('')
+  const [customAssistant, setCustomAssistant] = useState('')
+  const [troubleshooting, setTroubleshooting] = useState('')
+  const [noteText, setNoteText] = useState('')
+  const [workflowError, setWorkflowError] = useState<string | null>(null)
+  const [savingAction, setSavingAction] = useState<TicketWorkflowRequest['action'] | 'delete' | null>(null)
 
-  // Assisted By options
-  const assistedByOptions = [
-    'Kevin Christopher Gallego',
-    'Efraim Herald Malbas',
-    'John Melmar Losauro',
-    'N/A'
-  ]
-
-  // Fetch tickets
-  const fetchTickets = async () => {
+  const fetchTickets = useCallback(async () => {
     try {
       setLoading(true)
       setError(null)
-      const data = await getTickets()
-      setTickets(data)
-    } catch (err: any) {
-      console.error('Error fetching tickets:', err)
-      setError(err.message || 'Failed to load tickets')
+      setTickets(await getTickets())
+    } catch (fetchError: unknown) {
+      setError(fetchError instanceof Error ? fetchError.message : 'Failed to load tickets')
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
-  const fetchFive9LogoutIssues = async () => {
+  const fetchFive9 = useCallback(async () => {
     try {
       setLoading(true)
       setError(null)
-      const data = await getFive9LogoutIssues()
-      setFive9Logouts(data)
-    } catch (err: any) {
-      console.error('Error fetching Five9 logout issues:', err)
-      setError(err.message || 'Failed to load Five9 logout issues')
+      setFive9Logouts(await getFive9LogoutIssues() as Five9Logout[])
+    } catch (fetchError: unknown) {
+      setError(fetchError instanceof Error ? fetchError.message : 'Failed to load Five9 logout issues')
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
   useEffect(() => {
-    if (viewMode === 'it-issues') {
-      fetchTickets()
-    } else {
-      fetchFive9LogoutIssues()
+    if (!canManageTickets) {
+      setLoading(false)
+      return
     }
-  }, [viewMode])
+    void (viewMode === 'it-issues' ? fetchTickets() : fetchFive9())
+  }, [canManageTickets, fetchFive9, fetchTickets, viewMode])
 
-  // Filter and sort logic
-  const filteredAndSortedTickets = useMemo(() => {
-    let result = [...tickets]
+  useEffect(() => setCurrentPage(1), [activeStatus, dateFrom, dateTo, searchQuery])
 
-    if (dateFrom) {
-      result = result.filter((t) => t.date && t.date >= dateFrom)
-    }
-    if (dateTo) {
-      result = result.filter((t) => t.date && t.date <= dateTo)
-    }
+  const statusCounts = useMemo(() => {
+    const counts: Record<TicketStatus, number> = { Open: 0, Pending: 0, Solved: 0 }
+    tickets.forEach((ticket) => { counts[normalizeTicketStatus(ticket.status)] += 1 })
+    return counts
+  }, [tickets])
 
-    if (searchField && searchQuery) {
-      result = result.filter((ticket) => {
-        const fieldValue = ticket[searchField]
-        if (fieldValue === null || fieldValue === undefined) return false
-        if (searchField === 'onsite' || searchField === 'affected_five9') {
-          const boolStr = fieldValue ? 'yes' : 'no'
-          return boolStr.toLowerCase().includes(searchQuery.toLowerCase())
-        }
-        return String(fieldValue).toLowerCase().includes(searchQuery.toLowerCase())
+  const filteredTickets = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase()
+    return tickets
+      .filter((ticket) => activeStatus === 'All' || normalizeTicketStatus(ticket.status) === activeStatus)
+      .filter((ticket) => !dateFrom || Boolean(ticket.date && ticket.date >= dateFrom))
+      .filter((ticket) => !dateTo || Boolean(ticket.date && ticket.date <= dateTo))
+      .filter((ticket) => !query || [
+        ticket.ticketid,
+        ticket.name,
+        ticket.team_leader,
+        ticket.category,
+        ticket.concern,
+        ticket.assisted_by,
+        ticket.troubleshooting,
+      ].some((value) => String(value ?? '').toLowerCase().includes(query)))
+      .sort((first, second) => {
+        const firstKey = `${first.date || ''}T${first.start_time || ''}`
+        const secondKey = `${second.date || ''}T${second.start_time || ''}`
+        return secondKey.localeCompare(firstKey) || second.ticketid - first.ticketid
       })
-    }
+  }, [activeStatus, dateFrom, dateTo, searchQuery, tickets])
 
-    result.sort((a, b) => {
-      let aVal: any = a[sortColumn]
-      let bVal: any = b[sortColumn]
-      if (aVal === null) aVal = sortDirection === 'asc' ? '' : '~'
-      if (bVal === null) bVal = sortDirection === 'asc' ? '' : '~'
-      if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1
-      if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1
-      return 0
-    })
+  const totalPages = Math.max(1, Math.ceil(filteredTickets.length / PAGE_SIZE))
+  const paginatedTickets = filteredTickets.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages)
+  }, [currentPage, totalPages])
 
-    return result
-  }, [tickets, dateFrom, dateTo, searchField, searchQuery, sortColumn, sortDirection])
-
-  // Pagination
-  const totalPages = Math.ceil(filteredAndSortedTickets.length / itemsPerPage)
-  const paginatedTickets = filteredAndSortedTickets.slice(
-    (currentPage - 1) * itemsPerPage,
-    currentPage * itemsPerPage
-  )
-
-  const handleSort = (column: SortColumn) => {
-    if (sortColumn === column) {
-      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')
+  const openTicket = (ticket: Ticket) => {
+    const assistant = ticket.assisted_by?.trim() || ''
+    if (IT_STAFF.some((staff) => staff === assistant)) {
+      setAssistantOption(assistant)
+      setCustomAssistant('')
+    } else if (assistant) {
+      setAssistantOption('Others')
+      setCustomAssistant(assistant)
     } else {
-      setSortColumn(column)
-      setSortDirection('asc')
+      setAssistantOption('')
+      setCustomAssistant('')
     }
-    setCurrentPage(1)
+    setSelectedTicket(ticket)
+    setTroubleshooting(ticket.troubleshooting || '')
+    setNoteText('')
+    setWorkflowError(null)
   }
 
-  const clearFilters = () => {
-    setDateFrom('')
-    setDateTo('')
-    setSearchField('')
-    setSearchQuery('')
-    setSortColumn('date')
-    setSortDirection('desc')
-    setCurrentPage(1)
+  const assignedName = assistantOption === 'Others' ? customAssistant.trim() : assistantOption.trim()
+
+  const notifyWebex = (ticket: Ticket, action: 'pending' | 'solve') => {
+    if (!ticket.webex_message_id) return
+    const endpoint = action === 'pending' ? 'ticket-status' : 'ticket-resolve'
+    void fetch(`/api/webhook/${endpoint}?webex_message_id=${encodeURIComponent(ticket.webex_message_id)}`)
+      .catch((webhookError) => console.error('Webex notification failed:', webhookError))
   }
 
-  const getSortIcon = (column: SortColumn) => {
-    if (sortColumn !== column) return null
-    return sortDirection === 'asc' ? <ChevronUp size={16} /> : <ChevronDown size={16} />
-  }
-
-  const getStatusColor = (status: string | null) => {
-    switch (status?.toLowerCase()) {
-      case 'open':
-        return 'bg-error-container text-on-error-container'
-      case 'pending':
-        return 'bg-primary-container text-on-primary-container'
-      case 'resolved':
-      case 'completed':
-      case 'finished':
-        return 'bg-surface-container-highest text-on-surface'
-      default:
-        return 'bg-surface-container-highest text-on-surface'
+  const performWorkflow = async (request: TicketWorkflowRequest, webexAction?: 'pending' | 'solve') => {
+    if (!selectedTicket) return
+    try {
+      setSavingAction(request.action)
+      setWorkflowError(null)
+      const updated = await runTicketWorkflow(selectedTicket.ticketid, request)
+      setTickets((current) => current.map((ticket) => ticket.ticketid === updated.ticketid ? updated : ticket))
+      openTicket(updated)
+      if (request.action === 'add_note') setNoteText('')
+      if (webexAction) notifyWebex(updated, webexAction)
+    } catch (workflowFailure: unknown) {
+      setWorkflowError(workflowFailure instanceof Error ? workflowFailure.message : 'Unable to update this ticket')
+    } finally {
+      setSavingAction(null)
     }
   }
 
-  const handleEndTimeSave = async (ticketId: number) => {
-    if (!tempEndTime.trim()) {
-      setEditingEndTime(null)
+  const handlePending = () => {
+    if (!assignedName) {
+      setWorkflowError('Select an Assisted By value before moving this ticket to Pending.')
       return
     }
-    const parsedTime = parseTime(tempEndTime)
-    setSavingTicket(ticketId)
-    try {
-      await updateTicket(ticketId, { end_time: parsedTime })
-      setTickets(prev =>
-        prev.map(t => t.ticketid === ticketId ? { ...t, end_time: parsedTime } : t)
-      )
-      setEditingEndTime(null)
-    } catch (err) {
-      console.error('Error updating end_time:', err)
-      alert('Failed to update end time')
-    } finally {
-      setSavingTicket(null)
-    }
+    void performWorkflow({ action: 'pending', assistedBy: assignedName }, 'pending')
   }
 
-  const handleTroubleshootingSave = async (ticketId: number) => {
-    if (!tempTroubleshooting.trim()) {
-      setEditingTroubleshooting(null)
+  const handleSolve = () => {
+    if (!troubleshooting.trim()) {
+      setWorkflowError('Enter troubleshooting details before marking this ticket as Solved.')
       return
     }
-    setSavingTicket(ticketId)
-    try {
-      await updateTicket(ticketId, { troubleshooting: tempTroubleshooting })
-      setTickets(prev =>
-        prev.map(t => t.ticketid === ticketId ? { ...t, troubleshooting: tempTroubleshooting } : t)
-      )
-      setEditingTroubleshooting(null)
-    } catch (err) {
-      console.error('Error updating troubleshooting:', err)
-      alert('Failed to update troubleshooting')
-    } finally {
-      setSavingTicket(null)
-    }
+    void performWorkflow({
+      action: 'solve',
+      assistedBy: assignedName || undefined,
+      troubleshooting: troubleshooting.trim(),
+    }, 'solve')
   }
 
-  const startEditEndTime = (ticket: Ticket) => {
-    setEditingEndTime(ticket.ticketid)
-    setTempEndTime(ticket.end_time || '')
-  }
-
-  const startEditTroubleshooting = (ticket: Ticket) => {
-    setEditingTroubleshooting(ticket.ticketid)
-    setTempTroubleshooting(ticket.troubleshooting || '')
-    const timeData = convertTo12Hour(ticket.end_time)
-    setTempEndTimeHour(timeData.hour)
-    setTempEndTimeMinute(timeData.minute)
-    setTempEndTimeAMPM(timeData.ampm as 'AM' | 'PM')
-  }
-
-  const handleAssistedBySave = async (ticketId: number, webexMessageId?: string | null) => {
-    if (!tempAssistedBy.trim()) {
-      setEditingAssistedBy(null)
+  const handleDelete = async () => {
+    if (!selectedTicket || normalizeTicketStatus(selectedTicket.status) !== 'Open') {
+      setWorkflowError('Only Open tickets can be deleted.')
       return
     }
-    setSavingTicket(ticketId)
-    try {
-      await updateTicket(ticketId, { assisted_by: tempAssistedBy })
-      setTickets(prev =>
-        prev.map(t => t.ticketid === ticketId ? { ...t, assisted_by: tempAssistedBy } : t)
-      )
 
-      const msgId = webexMessageId || tickets.find(t => t.ticketid === ticketId)?.webex_message_id
-      if (!msgId) {
-        console.warn('No Webex Message ID for ticket:', ticketId)
-        setEditingAssistedBy(null)
-        return
-      }
-      try {
-        const response = await fetch(`/api/webhook/ticket-status?webex_message_id=${encodeURIComponent(msgId)}`)
-        if (response.ok) {
-          console.log('Webhook triggered successfully for ticket', ticketId, msgId)
-        } else {
-          const errorBody = await response.text()
-          console.warn('Webhook trigger failed:', response.status, response.statusText, errorBody)
-        }
-      } catch (webhookError) {
-        console.error('Webhook trigger network error:', webhookError)
-      }
-      setEditingAssistedBy(null)
-    } catch (err) {
-      console.error('Error updating assisted_by:', err)
-      alert('Failed to update assisted by')
+    const confirmed = window.confirm(
+      `Delete ticket #${selectedTicket.ticketid}? This permanently removes the database row and cannot be undone.`
+    )
+    if (!confirmed) return
+
+    try {
+      setSavingAction('delete')
+      setWorkflowError(null)
+      await deleteOpenTicket(selectedTicket.ticketid)
+      setTickets((current) => current.filter((ticket) => ticket.ticketid !== selectedTicket.ticketid))
+      setSelectedTicket(null)
+    } catch (deleteFailure: unknown) {
+      setWorkflowError(deleteFailure instanceof Error ? deleteFailure.message : 'Unable to delete this ticket')
     } finally {
-      setSavingTicket(null)
+      setSavingAction(null)
     }
   }
 
-  const handleAssistedByChange = async (ticketId: number, value: string, webexMessageId: string | null) => {
-    if (!value) return
-    setSavingTicket(ticketId)
-    try {
-      await updateTicket(ticketId, { assisted_by: value })
-      await fetchTickets()
+  const selectedStatus = selectedTicket ? normalizeTicketStatus(selectedTicket.status) : null
+  const saving = savingAction !== null
 
-     if (webexMessageId) {
-       try {
-         const response = await fetch(`/api/webhook/ticket-status?webex_message_id=${encodeURIComponent(webexMessageId)}`)
-         if (response.ok) {
-           console.log('Webhook triggered successfully for ticket', ticketId, webexMessageId)
-         } else {
-           console.warn('Webhook trigger returned non-ok status:', response.status)
-         }
-       } catch (webhookError) {
-         console.error('Webhook trigger failed:', webhookError)
-       }
-     } else {
-       console.warn('No Webex Message ID for ticket:', ticketId)
-     }
-     
-     // Close the modal after successful save and refresh
-     setSelectedTicket(null)
-   } catch (err) {
-     console.error('Error updating assisted_by:', err)
-     alert('Failed to update assisted by')
-   } finally {
-     setSavingTicket(null)
-   }
-  }
-
-  const startEditAssistedBy = (ticket: Ticket) => {
-    setEditingAssistedBy(ticket.ticketid)
-    setTempAssistedBy(ticket.assisted_by || '')
-  }
-
-  const handleAssistedByKeyDown = (e: React.KeyboardEvent, ticketId: number) => {
-    if (e.key === 'Enter') {
-      handleAssistedBySave(ticketId)
-    } else if (e.key === 'Escape') {
-      setEditingAssistedBy(null)
-    }
-  }
-
-  const handleTroubleshootingKeyDown = (e: React.KeyboardEvent, ticketId: number) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleTroubleshootingSave(ticketId)
-    } else if (e.key === 'Escape') {
-      setEditingTroubleshooting(null)
-    }
-  }
-
-  const handleEndTimeKeyDown = (e: React.KeyboardEvent, ticketId: number) => {
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      handleEndTimeSave(ticketId)
-    } else if (e.key === 'Escape') {
-      setEditingEndTime(null)
-    }
-  }
-
-  const handleTroubleshootingPendingSave = async (ticketId: number, finalize: boolean) => {
-    if (!tempTroubleshooting.trim() && !finalize) {
-      setTroubleshootingTicket(null)
-      return
-    }
-    setSavingTicket(ticketId)
-    try {
-      const updates: Partial<Ticket> = { troubleshooting: tempTroubleshooting }
-      const ticket = tickets.find(t => t.ticketid === ticketId)
-      if (finalize) {
-        updates.status = 'Resolved'
-        updates.end_time = convertTo24Hour(tempEndTimeHour, tempEndTimeMinute, tempEndTimeAMPM)
-      }
-      await updateTicket(ticketId, updates)
-
-      if (finalize && ticket?.webex_message_id) {
-        try {
-          const response = await fetch(`/api/webhook/ticket-resolve?webex_message_id=${encodeURIComponent(ticket.webex_message_id)}`)
-          if (response.ok) {
-            console.log('Resolve webhook triggered successfully for ticket', ticketId)
-          } else {
-            console.warn('Resolve webhook returned non-ok status:', response.status)
-          }
-        } catch (webhookError) {
-          console.error('Resolve webhook failed:', webhookError)
-        }
-      }
-
-      fetchTickets()
-      setTroubleshootingTicket(null)
-      setShowFinalizeConfirm(false)
-    } catch (err) {
-      console.error('Error updating troubleshooting:', err)
-      alert('Failed to update troubleshooting')
-    } finally {
-      setSavingTicket(null)
-    }
+  if (!canManageTickets) {
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center">
+        <div className="max-w-md rounded-xl border border-outline-variant/30 bg-surface p-8 text-center">
+          <AlertCircle size={32} className="mx-auto text-error" />
+          <h1 className="mt-4 font-hanken text-headline-md font-bold text-on-surface">Ticket management restricted</h1>
+          <p className="mt-2 text-sm text-on-surface-variant">IT ticket changes are available to assigned non-Agent roles.</p>
+        </div>
+      </div>
+    )
   }
 
   return (
-    <div className="space-y-8">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="space-y-6">
+      <header className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="font-hanken text-display-lg font-bold text-on-surface mb-2">
+          <h1 className="font-hanken text-display-lg font-bold text-on-surface">
             {viewMode === 'it-issues' ? 'IT Tickets' : 'Five9 Logout Issues'}
           </h1>
-          <p className="text-on-surface-variant">
-            {viewMode === 'it-issues' ? 'View and manage all submitted IT tickets' : 'View Five9 logout records from affected tickets'}
+          <p className="mt-1 text-on-surface-variant">
+            {viewMode === 'it-issues'
+              ? 'Manage ticket assignments, progress, notes, and complete action history.'
+              : 'Review Five9 logout records created by affected tickets.'}
           </p>
         </div>
-        <div className="flex items-center gap-4">
-          {/* View Switcher */}
-          <div className="flex items-center glass-effect rounded-lg p-1">
-            <button
-              onClick={() => setViewMode('it-issues')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
-                viewMode === 'it-issues'
-                  ? 'bg-primary text-on-primary'
-                  : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high'
-              }`}
-            >
-              IT Issues
-            </button>
-            <button
-              onClick={() => setViewMode('five9-logouts')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
-                viewMode === 'five9-logouts'
-                  ? 'bg-primary text-on-primary'
-                  : 'text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high'
-              }`}
-            >
-              Five9 Logout Issues
-            </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex rounded-lg bg-surface-container-low p-1">
+            {(['it-issues', 'five9-logouts'] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setViewMode(mode)}
+                className={`rounded-md px-3 py-2 text-sm font-medium ${viewMode === mode ? 'bg-primary text-on-primary' : 'text-on-surface-variant hover:text-on-surface'}`}
+              >
+                {mode === 'it-issues' ? 'IT Issues' : 'Five9 Logouts'}
+              </button>
+            ))}
           </div>
           <button
-            onClick={() => viewMode === 'it-issues' ? fetchTickets() : fetchFive9LogoutIssues()}
+            type="button"
+            onClick={() => void (viewMode === 'it-issues' ? fetchTickets() : fetchFive9())}
             disabled={loading}
-            className="flex items-center justify-center gap-2 px-lg py-md rounded-lg glass-effect text-on-surface font-medium transition-all hover:bg-surface-container-high disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-lg border border-outline-variant/40 px-3 py-2 text-sm font-medium text-on-surface disabled:opacity-50"
           >
-            <RefreshCw size={20} className={loading ? 'animate-spin' : ''} />
-            Refresh
+            <RefreshCw size={17} className={loading ? 'animate-spin' : ''} /> Refresh
           </button>
+          <Link href="/dashboard/it/submit-ticket" className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-on-primary">
+            <Send size={17} /> New ticket
+          </Link>
         </div>
-      </div>
+      </header>
 
-      {/* Filters Bar */}
-      <div className="glassEffect rounded-xl p-6 backdrop-blur-glass-lg space-y-4">
-        <div className="flex flex-col lg:flex-row gap-4">
-          {/* Date Range */}
-          <div className="flex-1">
-            <label className="block text-on-surface text-label-sm font-medium mb-2">Date Range</label>
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <Calendar size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant" />
-                <input
-                  type="date"
-                  value={dateFrom}
-                  onChange={(e) => {
-                    setDateFrom(e.target.value)
-                    setCurrentPage(1)
-                  }}
-                  className="w-full pl-10 pr-3 py-2 rounded-lg bg-surface-container-low/50 border border-outline-variant/50 text-on-surface focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all text-sm"
-                />
-              </div>
-              <div className="relative flex-1">
-                <Calendar size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant" />
-                <input
-                  type="date"
-                  value={dateTo}
-                  onChange={(e) => {
-                    setDateTo(e.target.value)
-                    setCurrentPage(1)
-                  }}
-                  className="w-full pl-10 pr-3 py-2 rounded-lg bg-surface-container-low/50 border border-outline-variant50 text-on-surface focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all text-sm"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Search */}
-          <div className="flex-1">
-            <label className="block text-on-surface text-label-sm font-medium mb-2">Search</label>
-            <div className="flex gap-2">
-              <select
-                value={searchField}
-                onChange={(e) => {
-                  setSearchField(e.target.value as SortColumn | '')
-                  setSearchQuery('')
-                }}
-                className="px-3 py-2 rounded-lg bg-surface-container-low/50 border border-outline-variant/50 text-on-surface focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all text-sm"
-              >
-                <option value="">All Fields</option>
-                <option value="team_leader">Team Leader</option>
-                <option value="name">Agent Name</option>
-                <option value="category">Category</option>
-                <option value="onsite">Onsite/WFH</option>
-                <option value="affected_five9">Five9 Issue</option>
-              </select>
-              <div className="relative flex-1">
+      {viewMode === 'it-issues' && (
+        <>
+          <nav aria-label="Ticket status" className="grid grid-cols-2 gap-2 rounded-xl bg-surface-container-low/60 p-2 sm:grid-cols-4">
+            {STATUS_TABS.map(({ value, icon: Icon }) => {
+              const count = value === 'All' ? tickets.length : statusCounts[value]
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setActiveStatus(value)}
+                  className={`flex items-center justify-center gap-2 rounded-lg px-3 py-3 text-sm font-semibold ${activeStatus === value ? 'bg-surface text-primary shadow-sm' : 'text-on-surface-variant hover:bg-surface/60'}`}
+                >
+                  <Icon size={17} /> {value}
+                  <span className="rounded-full bg-surface-container-high px-2 py-0.5 text-xs">{count}</span>
+                </button>
+              )
+            })}
+          </nav>
+          <section className="rounded-xl border border-outline-variant/25 bg-surface-container-low/25 p-4">
+            <div className="grid gap-3 lg:grid-cols-[1fr_auto_auto_auto]">
+              <div className="relative">
                 <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant" />
                 <input
-                  type="text"
+                  type="search"
                   value={searchQuery}
-                  onChange={(e) => {
-                    setSearchQuery(e.target.value)
-                    setCurrentPage(1)
-                  }}
-                  placeholder={searchField ? `Search by ${searchField.replace('_', ' ')}...` : 'Search all...'}
-                  className="w-full pl-10 pr-3 py-2 rounded-lg bg-surface-container-low/50 border border-outline-variant/50 text-on-surface focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all text-sm"
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="Search ticket ID, agent, category, concern, assignee..."
+                  className="w-full rounded-lg border border-outline-variant/40 bg-surface py-2.5 pl-10 pr-3 text-sm text-on-surface outline-none focus:border-primary"
                 />
               </div>
+              {[{ label: 'From date', value: dateFrom, setter: setDateFrom }, { label: 'To date', value: dateTo, setter: setDateTo }].map((field) => (
+                <label key={field.label} className="relative">
+                  <span className="sr-only">{field.label}</span>
+                  <Calendar size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant" />
+                  <input
+                    type="date"
+                    value={field.value}
+                    onChange={(event) => field.setter(event.target.value)}
+                    className="rounded-lg border border-outline-variant/40 bg-surface py-2.5 pl-9 pr-3 text-sm text-on-surface outline-none focus:border-primary"
+                  />
+                </label>
+              ))}
+              {(searchQuery || dateFrom || dateTo) && (
+                <button type="button" onClick={() => { setSearchQuery(''); setDateFrom(''); setDateTo('') }} className="inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm text-on-surface-variant hover:bg-surface-container-high">
+                  <X size={17} /> Clear
+                </button>
+              )}
             </div>
-          </div>
-        </div>
-
-        {(dateFrom || dateTo || searchField || searchQuery) && (
-          <div className="flex justify-end">
-            <button
-              onClick={clearFilters}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors text-sm"
-            >
-              <X size={16} />
-              Clear Filters
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Error State */}
-      {error && (
-        <div className="p-6 rounded-xl bg-error/10 text-error text-center">{error}</div>
+          </section>
+        </>
       )}
 
-      {/* Main Content */}
+      {error && <div className="flex items-center gap-3 rounded-xl bg-error/10 p-4 text-error"><AlertCircle size={20} /><p className="text-sm">{error}</p></div>}
+
       {loading ? (
-        <div className="flex items-center justify-center py-20">
-          <div className="w-12 h-12 border-4 border-outline-variant/30 border-t-primary rounded-full animate-spin"></div>
-        </div>
+        <div className="flex items-center justify-center gap-3 py-20 text-on-surface-variant"><Loader2 size={28} className="animate-spin text-primary" />Loading records...</div>
       ) : viewMode === 'it-issues' ? (
-        filteredAndSortedTickets.length === 0 ? (
-          <div className="text-center py-20 text-on-surface-variant">
-            No tickets found matching the current filters
-          </div>
+        filteredTickets.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-outline-variant/50 py-20 text-center text-on-surface-variant">No tickets match these filters.</div>
         ) : (
           <>
-            {/* Desktop Table */}
-            <div className="overflow-x-auto rounded-xl">
+            <div className="hidden overflow-x-auto rounded-xl border border-outline-variant/25 md:block">
               <table className="w-full">
                 <thead className="bg-surface-container-low">
-                  <tr>
-                    {[
-                      { key: 'status', label: 'Status', icon: null },
-                      { key: 'date', label: 'Date', icon: Calendar },
-                      { key: 'team_leader', label: 'Team Leader', icon: Users },
-                      { key: 'name', label: 'Agent', icon: User },
-                      { key: 'category', label: 'Category', icon: Tag },
-                      { key: 'concern', label: 'Concern', icon: null },
-                      { key: 'start_time', label: 'Start Time', icon: Clock },
-                      { key: 'end_time', label: 'End Time', icon: Clock },
-                      { key: 'troubleshooting', label: 'Troubleshooting', icon: Wrench },
-                      { key: 'onsite', label: 'Work Setup', icon: Building2 },
-                      { key: 'affected_five9', label: 'Five9 Affected', icon: Phone },
-                      { key: 'assisted_by', label: 'Assisted by', icon: null },
-                    ].map((col) => (
-                      <th
-                        key={col.key}
-                        onClick={() => handleSort(col.key as SortColumn)}
-                        className="px-4 py-3 text-left text-label-sm font-semibold text-on-surface-variant cursor-pointer hover:text-on-surface transition-colors select-none whitespace-nowrap"
-                      >
-                        <div className="flex items-center gap-1.5">
-                          {col.icon && <col.icon size={16} />}
-                          <span>{col.label}</span>
-                          {getSortIcon(col.key as SortColumn)}
-                        </div>
-                      </th>
-                    ))}
+                  <tr className="text-left text-xs font-semibold uppercase tracking-wide text-on-surface-variant">
+                    {['Status', 'Date / Time', 'Affected Agent', 'Category', 'Concern', 'Reported', 'Assisted by'].map((heading) => <th key={heading} className="px-4 py-3">{heading}</th>)}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-outline-variant/10">
-                  {paginatedTickets.map((ticket) => {
-                    const status = ticket.status?.toLowerCase() || 'open'
-                    const isClickable = status === 'open' || status === 'pending'
-                    return (
-                      <tr
-                        key={ticket.ticketid}
-                        className={`hover:bg-surface-container-high/50 transition-colors ${isClickable ? 'cursor-pointer' : ''}`}
-                        onClick={() => {
-                          if (status === 'open') {
-                            setSelectedTicket(ticket)
-                            setTempAssistedBy(ticket.assisted_by || '')
-                          } else if (status === 'pending') {
-                            setTroubleshootingTicket(ticket)
-                            setTempTroubleshooting(ticket.troubleshooting || '')
-                          }
-                        }}
-                      >
-                        {/* Status */}
-                        <td className="px-4 py-3 text-sm">
-                          <span className={`inline-flex px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(ticket.status)}`}>
-                            {ticket.status || 'Open'}
-                          </span>
-                        </td>
-
-                        {/* Date */}
-                        <td className="px-4 py-3 text-sm text-on-surface">
-                          {ticket.date ? formatDate(ticket.date) : '-'}
-                        </td>
-
-                        {/* Team Leader */}
-                        <td className="px-4 py-3 text-sm text-on-surface">{ticket.team_leader || '-'}</td>
-
-                        {/* Agent */}
-                        <td className="px-4 py-3 text-sm text-on-surface">{ticket.name || '-'}</td>
-
-                        {/* Category */}
-                        <td className="px-4 py-3 text-sm text-on-surface">{ticket.category || '-'}</td>
-
-                        {/* Concern */}
-                        <td className="px-4 py-3 text-sm text-on-surface max-w-xs truncate" title={ticket.concern || ''}>
-                          {ticket.concern || '-'}
-                        </td>
-
-                        {/* Start Time */}
-                        <td className="px-4 py-3 text-sm text-on-surface font-mono">{formatTime(ticket.start_time)}</td>
-
-                        {/* End Time */}
-                        <td className="px-4 py-3 text-sm">
-                          <span className="font-mono text-on-surface">
-                            {ticket.end_time ? formatTime(ticket.end_time) : 'None'}
-                          </span>
-                        </td>
-
-                        {/* Troubleshooting */}
-                        <td className="px-4 py-3 text-sm max-w-xs">
-                          <span className="text-on-surface line-clamp-2" title={ticket.troubleshooting || ''}>
-                            {ticket.troubleshooting || 'None'}
-                          </span>
-                        </td>
-
-                        {/* Onsite/WFH */}
-                        <td className="px-4 py-3 text-sm">
-                          <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${
-                            ticket.onsite ? 'bg-success/20 text-success' : 'bg-surface-container-high text-on-surface-variant'
-                          }`}>
-                            {ticket.onsite ? 'Onsite' : 'WFH'}
-                          </span>
-                        </td>
-
-                        {/* Five9 Affected */}
-                        <td className="px-4 py-3 text-sm">
-                          <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${
-                            ticket.affected_five9 ? 'bg-error/20 text-error' : 'bg-success/20 text-success'
-                          }`}>
-                            {ticket.affected_five9 ? 'Affected' : 'Not Affected'}
-                          </span>
-                        </td>
-
-                        {/* Assisted By */}
-                        <td className="px-4 py-3 text-sm">
-                          <span className="text-on-surface">{ticket.assisted_by || 'None'}</span>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Pagination */}
-            {totalPages > 1 && (
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-on-surface-variant">
-                  Showing {(currentPage - 1) * itemsPerPage + 1} to{' '}
-                  {Math.min(currentPage * itemsPerPage, filteredAndSortedTickets.length)} of{' '}
-                  {filteredAndSortedTickets.length} tickets
-                </p>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                    disabled={currentPage === 1}
-                    className="p-2 rounded-lg hover:bg-surface-container-high disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  >
-                    <ChevronLeft size={20} />
-                  </button>
-                  <div className="flex items-center gap-1">
-                    {Array.from({ length: totalPages }, (_, i) => i + 1)
-                      .filter((page) => {
-                        const lastPage = totalPages
-                        if (page === 1 || page === lastPage) return true
-                        return Math.abs(page - currentPage) <= 1
-                      })
-                      .map((page, idx, arr) => (
-                        <span key={page}>
-                          {idx > 0 && arr[idx - 1] !== page - 1 && (
-                            <span className="px-2 text-on-surface-variant">...</span>
-                          )}
-                          <button
-                            onClick={() => setCurrentPage(page)}
-                            className={`w-10 h-10 rounded-lg font-medium transition-colors ${
-                              currentPage === page
-                                ? 'bg-primary text-on-primary'
-                                : 'hover:bg-surface-container-high text-on-surface'
-                            }`}
-                          >
-                            {page}
-                          </button>
+                <tbody className="divide-y divide-outline-variant/15 bg-surface">
+                  {paginatedTickets.map((ticket) => (
+                    <tr
+                      key={ticket.ticketid}
+                      tabIndex={0}
+                      role="button"
+                      aria-label={`Open ticket ${ticket.ticketid}`}
+                      onClick={() => openTicket(ticket)}
+                      onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') openTicket(ticket) }}
+                      className="cursor-pointer hover:bg-surface-container-low/60 focus:outline-none"
+                    >
+                      <td className="px-4 py-4"><StatusBadge status={ticket.status} /></td>
+                      <td className="whitespace-nowrap px-4 py-4 text-sm text-on-surface">{ticket.date ? formatDate(ticket.date) : '—'}<p className="font-mono text-xs text-on-surface-variant">{formatTime(ticket.start_time)}</p></td>
+                      <td className="px-4 py-4 text-sm text-on-surface"><p className="font-medium">{ticket.name || 'Unknown'}</p><p className="text-xs text-on-surface-variant">#{ticket.ticketid}</p></td>
+                      <td className="px-4 py-4 text-sm text-on-surface">{ticket.category || '—'}</td>
+                      <td className="max-w-sm px-4 py-4 text-sm text-on-surface"><p className="line-clamp-2">{ticket.concern || '—'}</p></td>
+                      <td className="px-4 py-4 text-sm">
+                        <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${ticket.reported ? 'bg-success/15 text-success' : 'bg-surface-container-high text-on-surface-variant'}`}>
+                          {ticket.reported ? 'Reported' : 'Not reported'}
                         </span>
-                      ))}
-                  </div>
-                  <button
-                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                    disabled={currentPage === totalPages}
-                    className="p-2 rounded-lg hover:bg-surface-container-high disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  >
-                    <ChevronRight size={20} />
-                  </button>
-                </div>
-              </div>
-            )}
-          </>
-        )
-      ) : (
-        <>
-          {/* Five9 Logout Issues - Desktop */}
-          {five9Logouts.length === 0 ? (
-            <div className="text-center py-20 text-on-surface-variant">
-              No Five9 logout records found
-            </div>
-          ) : (
-            <div className="overflow-x-auto rounded-xl">
-              <table className="w-full">
-                <thead className="bg-surface-container-low">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-label-sm font-semibold text-on-surface-variant whitespace-nowrap">
-                      <div className="flex items-center gap-1.5">
-                        <Calendar size={16} />
-                        <span>Date</span>
-                      </div>
-                    </th>
-                    <th className="px-4 py-3 text-left text-label-sm font-semibold text-on-surface-variant whitespace-nowrap">
-                      <div className="flex items-center gap-1.5">
-                        <User size={16} />
-                        <span>Name</span>
-                      </div>
-                    </th>
-                    <th className="px-4 py-3 text-left text-label-sm font-semibold text-on-surface-variant whitespace-nowrap">
-                      <div className="flex items-center gap-1.5">
-                        <Clock size={16} />
-                        <span>Logout Time</span>
-                      </div>
-                    </th>
-                    <th className="px-4 py-3 text-left text-label-sm font-semibold text-on-surface-variant whitespace-nowrap">
-                      <div className="flex items-center gap-1.5">
-                        <Clock size={16} />
-                        <span>Login Time</span>
-                      </div>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-outline-variant/10">
-                  {five9Logouts.map((logout) => (
-                    <tr key={logout.id} className="hover:bg-surface-container-high/50 transition-colors">
-                      <td className="px-4 py-3 text-sm text-on-surface">
-                        {logout.created_at ? formatDate(logout.created_at) : '-'}
                       </td>
-                      <td className="px-4 py-3 text-sm text-on-surface">{logout.name || '-'}</td>
-                      <td className="px-4 py-3 text-sm text-on-surface font-mono">{formatTime(logout.start_time)}</td>
-                      <td className="px-4 py-3 text-sm text-on-surface font-mono">{formatTime(logout.end_time)}</td>
+                      <td className="px-4 py-4 text-sm text-on-surface">{ticket.assisted_by || 'Unassigned'}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          )}
-        </>
+            <div className="space-y-3 md:hidden">
+              {paginatedTickets.map((ticket) => (
+                <button key={ticket.ticketid} type="button" onClick={() => openTicket(ticket)} className="w-full rounded-xl border border-outline-variant/25 bg-surface p-4 text-left">
+                  <div className="flex items-start justify-between gap-3"><div><p className="font-hanken font-semibold text-on-surface">{ticket.category || 'Uncategorized'}</p><p className="text-xs text-on-surface-variant">Ticket #{ticket.ticketid}</p></div><div className="flex flex-wrap justify-end gap-1.5">{ticket.reported && <span className="inline-flex rounded-full bg-success/15 px-2.5 py-1 text-xs font-semibold text-success">Reported</span>}<StatusBadge status={ticket.status} /></div></div>
+                  <p className="mt-3 line-clamp-2 text-sm text-on-surface">{ticket.concern || 'No concern provided'}</p>
+                  <div className="mt-3 flex justify-between gap-3 text-xs text-on-surface-variant"><span>{ticket.name || 'Unknown reporter'}</span><span>{ticket.date ? formatDate(ticket.date) : '—'} · {formatTime(ticket.start_time)}</span></div>
+                </button>
+              ))}
+            </div>
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between gap-4">
+                <p className="text-sm text-on-surface-variant">{(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, filteredTickets.length)} of {filteredTickets.length}</p>
+                <div className="flex items-center gap-2">
+                  <button type="button" onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} disabled={currentPage === 1} aria-label="Previous page" className="rounded-lg border border-outline-variant/30 p-2 disabled:opacity-40"><ChevronLeft size={18} /></button>
+                  <span className="text-sm">Page {currentPage} of {totalPages}</span>
+                  <button type="button" onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))} disabled={currentPage === totalPages} aria-label="Next page" className="rounded-lg border border-outline-variant/30 p-2 disabled:opacity-40"><ChevronRight size={18} /></button>
+                </div>
+              </div>
+            )}
+          </>
+        )
+      ) : five9Logouts.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-outline-variant/50 py-20 text-center text-on-surface-variant">No Five9 logout records found.</div>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-outline-variant/25">
+          <table className="w-full">
+            <thead className="bg-surface-container-low"><tr className="text-left text-xs font-semibold uppercase tracking-wide text-on-surface-variant">{['Date', 'Name', 'Logout time', 'Login time'].map((heading) => <th key={heading} className="px-4 py-3">{heading}</th>)}</tr></thead>
+            <tbody className="divide-y divide-outline-variant/15 bg-surface">
+              {five9Logouts.map((logout) => <tr key={logout.id}><td className="px-4 py-4 text-sm">{formatDate(logout.created_at)}</td><td className="px-4 py-4 text-sm">{logout.name || 'Unknown'}</td><td className="px-4 py-4 font-mono text-sm">{formatTime(logout.start_time)}</td><td className="px-4 py-4 font-mono text-sm">{formatTime(logout.end_time)}</td></tr>)}
+            </tbody>
+          </table>
+        </div>
       )}
 
-      {/* Mobile Cards - IT Issues */}
-      {viewMode === 'it-issues' && (
-        <div className="md:hidden space-y-4">
-          {paginatedTickets.map((ticket) => {
-            const status = ticket.status?.toLowerCase()
-            const isClickable = status === 'open' || status === 'pending'
-            return (
-              <div
-                key={ticket.ticketid}
-                className={`glass-effect rounded-xl p-4 space-y-3 ${isClickable ? 'cursor-pointer hover:bg-surface-container-high/50 transition-colors' : ''}`}
-                onClick={() => {
-                  if (status === 'open') {
-                    setSelectedTicket(ticket)
-                    setTempAssistedBy(ticket.assisted_by || '')
-                  } else if (status === 'pending') {
-                    setTroubleshootingTicket(ticket)
-                    setTempTroubleshooting(ticket.troubleshooting || '')
-                  }
-                }}
-              >
-                <div className="flex items-start justify-between">
-                  <div>
-                    <p className="font-hanken text-label-lg font-bold text-on-surface">{ticket.category || 'Unknown'}</p>
-                    <p className="text-xs text-on-surface-variant">
-                      {ticket.date ? formatDate(ticket.date) : '-'} at {formatTime(ticket.start_time)}
-                    </p>
+      {selectedTicket && selectedStatus && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-[100] flex items-center justify-center overflow-hidden bg-black/55 p-2 sm:p-4" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) setSelectedTicket(null) }}>
+          <div role="dialog" aria-modal="true" aria-labelledby="ticket-dialog-title" className="max-h-[94vh] w-full max-w-6xl overflow-y-auto rounded-2xl bg-surface shadow-2xl">
+            <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-outline-variant/25 bg-surface/95 px-5 py-4 backdrop-blur sm:px-6">
+              <div><div className="flex flex-wrap items-center gap-2"><h2 id="ticket-dialog-title" className="font-hanken text-headline-md font-bold text-on-surface">Ticket #{selectedTicket.ticketid}</h2><StatusBadge status={selectedTicket.status} /></div><p className="mt-1 text-sm text-on-surface-variant">Affected agent: {selectedTicket.name || 'Unknown'}</p></div>
+              <button type="button" onClick={() => setSelectedTicket(null)} disabled={saving} aria-label="Close ticket details" className="rounded-lg p-2 text-on-surface-variant hover:bg-surface-container-high disabled:opacity-50"><X size={22} /></button>
+            </div>
+            <div className="grid gap-5 p-5 sm:p-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
+              <div className="space-y-5">
+                <section className="rounded-xl border border-outline-variant/30 p-5">
+                  <div className="mb-4 flex items-center gap-2"><Tag size={18} className="text-primary" /><h3 className="font-hanken font-semibold text-on-surface">Ticket Details</h3></div>
+                  <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    <Detail label="Affected Agent" value={selectedTicket.name} /><Detail label="Category" value={selectedTicket.category} />
+                    <Detail label="Date" value={selectedTicket.date ? formatDate(selectedTicket.date) : '—'} /><Detail label="Start Time" value={formatTime(selectedTicket.start_time)} /><Detail label="End Time" value={formatTime(selectedTicket.end_time)} />
+                    <Detail label="Five9 Affected" value={selectedTicket.affected_five9 ? 'Yes' : 'No'} /><Detail label="Assisted By" value={selectedTicket.assisted_by || 'Unassigned'} />
+                  </dl>
+                  <div className="mt-5 border-t border-outline-variant/20 pt-4">
+                    <label className="flex cursor-pointer items-start gap-3 rounded-lg bg-surface-container-low/60 p-3">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(selectedTicket.reported)}
+                        onChange={(event) => void performWorkflow({ action: 'set_reported', reported: event.target.checked })}
+                        disabled={saving}
+                        className="mt-0.5 h-5 w-5 rounded border-outline-variant text-primary focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
+                      />
+                      <span>
+                        <span className="block text-sm font-semibold text-on-surface">Reported</span>
+                        <span className="mt-0.5 block text-xs text-on-surface-variant">Available in Open, Pending, and Solved tickets. Changes are added to history.</span>
+                      </span>
+                      {savingAction === 'set_reported' && <Loader2 size={17} className="ml-auto animate-spin text-primary" />}
+                    </label>
                   </div>
-                  <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(ticket.status)}`}>
-                    {ticket.status || 'Open'}
-                  </span>
-                </div>
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-on-surface-variant">Agent:</span>
-                    <span className="text-on-surface">{ticket.name || '-'}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-on-surface-variant">Team Leader:</span>
-                    <span className="text-on-surface">{ticket.team_leader || '-'}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-on-surface-variant">Start:</span>
-                    <span className="font-mono">{formatTime(ticket.start_time)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-on-surface-variant">End:</span>
-                    <span className="font-mono">{ticket.end_time ? formatTime(ticket.end_time) : 'None'}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-on-surface-variant">Work Setup:</span>
-                    <span className={ticket.onsite ? 'text-success' : 'text-on-surface'}>
-                      {ticket.onsite ? 'Onsite' : 'WFH'}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-on-surface-variant">Five9 Issue:</span>
-                    <span className={ticket.affected_five9 ? 'text-error' : 'text-success'}>
-                      {ticket.affected_five9 ? 'Yes' : 'No'}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-on-surface-variant">Assisted By:</span>
-                    <span className="text-on-surface">{ticket.assisted_by || 'None'}</span>
-                  </div>
-                  <div>
-                    <p className="text-on-surface-variant text-xs mb-1">Concern:</p>
-                    <p className="text-on-surface text-sm line-clamp-2">{ticket.concern || 'None'}</p>
-                  </div>
-                  {ticket.troubleshooting && (
+                  <div className="mt-5 border-t border-outline-variant/20 pt-4"><p className="text-xs font-semibold uppercase tracking-wide text-on-surface-variant">Concern</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-on-surface">{selectedTicket.concern || 'No concern provided.'}</p></div>
+                </section>
+
+                <section className="rounded-xl border border-outline-variant/30 p-5">
+                  <div className="mb-4 flex items-center gap-2"><Wrench size={18} className="text-primary" /><h3 className="font-hanken font-semibold text-on-surface">{selectedStatus === 'Solved' ? 'Resolution' : 'Workflow'}</h3></div>
+                  <div className="space-y-4">
                     <div>
-                      <p className="text-on-surface-variant text-xs mb-1">Troubleshooting:</p>
-                      <p className="text-on-surface text-sm whitespace-pre-wrap">{ticket.troubleshooting}</p>
+                      <label htmlFor="assisted-by" className="mb-1.5 block text-sm font-medium text-on-surface">Assisted By {selectedStatus === 'Open' && <span className="text-error">*</span>}</label>
+                      {selectedStatus === 'Solved' ? (
+                        <p className="rounded-lg bg-surface-container-low px-3 py-2.5 text-sm">{selectedTicket.assisted_by || selectedTicket.name || 'Unknown'}</p>
+                      ) : (
+                        <>
+                          <select id="assisted-by" value={assistantOption} onChange={(event) => { setAssistantOption(event.target.value); if (event.target.value !== 'Others') setCustomAssistant(''); setWorkflowError(null) }} disabled={saving} className="w-full rounded-lg border border-outline-variant/50 bg-surface-container-low/40 px-3 py-2.5 text-sm text-on-surface outline-none focus:border-primary">
+                            <option value="">Select IT staff...</option>{IT_STAFF.map((staff) => <option key={staff} value={staff}>{staff}</option>)}<option value="Others">Others</option>
+                          </select>
+                          {assistantOption === 'Others' && <input type="text" value={customAssistant} onChange={(event) => { setCustomAssistant(event.target.value); setWorkflowError(null) }} maxLength={200} autoFocus placeholder="Enter staff member name" disabled={saving} className="mt-2 w-full rounded-lg border border-outline-variant/50 bg-surface px-3 py-2.5 text-sm text-on-surface outline-none focus:border-primary" />}
+                          {selectedStatus === 'Open' && !assignedName && <p className="mt-1.5 text-xs text-on-surface-variant">Required for Pending. If solved directly, the reporter is used as the fallback.</p>}
+                        </>
+                      )}
                     </div>
-                  )}
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      )}
-
-      {/* Mobile Cards - Five9 Logout Issues */}
-      {viewMode === 'five9-logouts' && (
-        <div className="md:hidden space-y-4">
-          {five9Logouts.length === 0 ? (
-            <div className="text-center py-20 text-on-surface-variant">No Five9 logout records found</div>
-          ) : (
-            five9Logouts.map((logout) => (
-              <div key={logout.id} className="glass-effect rounded-xl p-4 space-y-3">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <p className="font-hanken text-label-lg font-bold text-on-surface">{logout.name || 'Unknown'}</p>
-                    <p className="text-xs text-on-surface-variant">
-                      {logout.created_at ? formatDate(logout.created_at) : '-'}
-                    </p>
+                    <div>
+                      <label htmlFor="troubleshooting" className="mb-1.5 block text-sm font-medium text-on-surface">Troubleshooting {selectedStatus !== 'Solved' && <span className="text-error">*</span>}</label>
+                      {selectedStatus === 'Solved' ? (
+                        <p className="min-h-20 whitespace-pre-wrap rounded-lg bg-surface-container-low px-3 py-2.5 text-sm leading-6">{selectedTicket.troubleshooting || 'No troubleshooting details recorded.'}</p>
+                      ) : (
+                        <textarea id="troubleshooting" value={troubleshooting} onChange={(event) => { setTroubleshooting(event.target.value); setWorkflowError(null) }} rows={5} maxLength={8000} placeholder="Document diagnostics and troubleshooting steps..." disabled={saving} className="w-full resize-y rounded-lg border border-outline-variant/50 bg-surface px-3 py-2.5 text-sm text-on-surface outline-none focus:border-primary" />
+                      )}
+                    </div>
+                    {workflowError && <div className="flex items-start gap-2 rounded-lg bg-error/10 p-3 text-sm text-error"><AlertCircle size={17} className="mt-0.5 shrink-0" />{workflowError}</div>}
+                    {selectedStatus !== 'Solved' && (
+                      <div className="flex flex-col-reverse gap-2 border-t border-outline-variant/20 pt-4 sm:flex-row sm:flex-wrap sm:justify-end">
+                        {selectedStatus === 'Open' && <button type="button" onClick={() => void handleDelete()} disabled={saving} className="inline-flex items-center justify-center gap-2 rounded-lg border border-error/40 px-4 py-2.5 text-sm font-medium text-error hover:bg-error/10 disabled:opacity-45 sm:mr-auto">{savingAction === 'delete' ? <Loader2 size={17} className="animate-spin" /> : <Trash2 size={17} />}Delete ticket</button>}
+                        <button type="button" onClick={() => void performWorkflow({ action: 'save_troubleshooting', troubleshooting: troubleshooting.trim() })} disabled={saving || !troubleshooting.trim() || troubleshooting.trim() === (selectedTicket.troubleshooting || '').trim()} className="inline-flex items-center justify-center gap-2 rounded-lg border border-outline-variant/40 px-4 py-2.5 text-sm font-medium disabled:opacity-45">{savingAction === 'save_troubleshooting' ? <Loader2 size={17} className="animate-spin" /> : <Wrench size={17} />}Save progress</button>
+                        {selectedStatus === 'Open' && <button type="button" onClick={handlePending} disabled={saving || !assignedName} className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary-container px-4 py-2.5 text-sm font-medium text-on-primary-container disabled:opacity-45">{savingAction === 'pending' ? <Loader2 size={17} className="animate-spin" /> : <PauseCircle size={17} />}Put to Pending</button>}
+                        <button type="button" onClick={handleSolve} disabled={saving || !troubleshooting.trim()} className="inline-flex items-center justify-center gap-2 rounded-lg bg-success px-4 py-2.5 text-sm font-medium text-on-success disabled:opacity-45">{savingAction === 'solve' ? <Loader2 size={17} className="animate-spin" /> : <CheckCircle2 size={17} />}Mark as Solved</button>
+                      </div>
+                    )}
                   </div>
-                </div>
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-on-surface-variant">Logout Time:</span>
-                    <span className="font-mono">{formatTime(logout.start_time)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-on-surface-variant">Login Time:</span>
-                    <span className="font-mono">{formatTime(logout.end_time)}</span>
-                  </div>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      )}
+                </section>
 
-      {/* Modals */}
-      {selectedTicket && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setSelectedTicket(null)}>
-          <div className="bg-surface rounded-xl p-6 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
-            <h3 className="font-hanken text-headline-md font-bold text-on-surface mb-4">Ticket Details</h3>
-            <div className="space-y-4">
-              <div>
-                <label className="text-label-sm font-medium text-on-surface-variant">Agent</label>
-                <p className="text-on-surface">{selectedTicket!.name || 'Unknown'}</p>
-              </div>
-              <div>
-                <label className="text-label-sm font-medium text-on-surface-variant">Category</label>
-                <p className="text-on-surface">{selectedTicket!.category || 'Unknown'}</p>
-              </div>
-              <div>
-                <label className="text-label-sm font-medium text-on-surface-variant">Concern</label>
-                <p className="text-on-surface">{selectedTicket!.concern || 'None'}</p>
-              </div>
-              <div>
-                <label className="text-label-sm font-medium text-on-surface-variant">Assisted By</label>
-                <select
-                  value={tempAssistedBy}
-                  onChange={(e) => {
-                    setTempAssistedBy(e.target.value)
-                    if (e.target.value && selectedTicket) {
-                      handleAssistedByChange(selectedTicket.ticketid, e.target.value, selectedTicket.webex_message_id)
-                    }
-                  }}
-                  className="w-full px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant/50 text-on-surface focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 text-sm mt-1"
-                >
-                  <option value="">Select...</option>
-                  {assistedByOptions.map((option) => (
-                    <option key={option} value={option}>{option}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div className="flex gap-2 mt-6">
-              <button onClick={() => setSelectedTicket(null)} className="flex-1 px-4 py-2 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors">Close</button>
-              <button
-                onClick={async () => {
-                  if (tempAssistedBy && selectedTicket) {
-                    await handleAssistedByChange(selectedTicket.ticketid, tempAssistedBy, selectedTicket.webex_message_id)
-                  }
-                }}
-                disabled={!tempAssistedBy || savingTicket === selectedTicket!.ticketid}
-                className="flex-1 px-4 py-2 rounded-lg bg-primary text-on-primary hover:bg-primary/90 transition-colors disabled:opacity-50"
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {troubleshootingTicket && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setTroubleshootingTicket(null)}>
-          <div className="bg-surface rounded-xl p-6 max-w-md w-full" onClick={(e) => e.stopPropagation()}>
-            <h3 className="font-hanken text-headline-md font-bold text-on-surface mb-4">Update Troubleshooting</h3>
-            <div className="space-y-4">
-              <div>
-                <label className="text-label-sm font-medium text-on-surface-variant">Agent</label>
-                <p className="text-on-surface">{troubleshootingTicket!.name || 'Unknown'}</p>
-              </div>
-              <div>
-                <label className="text-label-sm font-medium text-on-surface-variant">Category</label>
-                <p className="text-on-surface">{troubleshootingTicket!.category || 'Unknown'}</p>
-              </div>
-              <div>
-                <label className="text-label-sm font-medium text-on-surface-variant">Troubleshooting</label>
-                <textarea
-                  autoFocus
-                  value={tempTroubleshooting}
-                  onChange={(e) => setTempTroubleshooting(e.target.value)}
-                  className="w-full mt-1 px-3 py-2 rounded-lg bg-surface-container-low border border-outline-variant/50 text-on-surface focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 text-sm resize-none"
-                  placeholder="Enter troubleshooting steps..."
-                  rows={3}
+                <NotesPanel
+                  ticket={selectedTicket}
+                  noteText={noteText}
+                  saving={saving}
+                  onChange={(value) => { setNoteText(value); setWorkflowError(null) }}
+                  onSave={() => void performWorkflow({ action: 'add_note', note: noteText.trim() })}
                 />
               </div>
-              <div>
-                <label className="text-label-sm font-medium text-on-surface-variant mb-2 block">End Time</label>
-                <div className="flex gap-2 items-center">
-                  <div className="flex-1">
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      maxLength={2}
-                      value={tempEndTimeHour}
-                      onChange={(e) => {
-                        const val = e.target.value.replace(/[^0-9]/g, '')
-                        if (val === '' || (parseInt(val) >= 1 && parseInt(val) <= 12)) {
-                          setTempEndTimeHour(val)
-                        }
-                      }}
-                      placeholder="HH"
-                      className="w-full px-2 py-2 rounded-lg bg-surface-container-low border border-outline-variant/50 text-on-surface focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 text-sm text-center font-mono"
-                    />
-                  </div>
-                  <span className="text-on-surface font-mono">:</span>
-                  <div className="flex-1">
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      maxLength={2}
-                      value={tempEndTimeMinute}
-                      onChange={(e) => {
-                        const val = e.target.value.replace(/[^0-9]/g, '')
-                        if (val === '' || parseInt(val) <= 59) {
-                          setTempEndTimeMinute(val)
-                        }
-                      }}
-                      placeholder="MM"
-                      className="w-full px-2 py-2 rounded-lg bg-surface-container-low border border-outline-variant/50 text-on-surface focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 text-sm text-center font-mono"
-                    />
-                  </div>
-                  <select
-                    value={tempEndTimeAMPM}
-                    onChange={(e) => setTempEndTimeAMPM(e.target.value as 'AM' | 'PM')}
-                    className="px-2 py-2 rounded-lg bg-surface-container-low border border-outline-variant/50 text-on-surface focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 text-sm"
-                  >
-                    <option value="AM">AM</option>
-                    <option value="PM">PM</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-            <div className="flex gap-2 mt-6">
-              <button
-                onClick={() => setTroubleshootingTicket(null)}
-                disabled={savingTicket === troubleshootingTicket!.ticketid}
-                className="flex-1 px-4 py-2 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => setShowFinalizeConfirm(true)}
-                disabled={savingTicket === troubleshootingTicket!.ticketid}
-                className="flex-1 px-4 py-2 rounded-lg bg-primary text-on-primary hover:bg-primary/90 transition-colors disabled:opacity-50"
-              >
-                Save
-              </button>
+              <HistoryPanel ticket={selectedTicket} />
             </div>
           </div>
-        </div>
-      )}
-
-      {showFinalizeConfirm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4" onClick={() => setShowFinalizeConfirm(false)}>
-          <div className="bg-surface rounded-xl p-6 max-w-sm w-full" onClick={(e) => e.stopPropagation()}>
-            <h3 className="font-hanken text-headline-md font-bold text-on-surface mb-2">Finalize Troubleshooting?</h3>
-            <p className="text-on-surface-variant mb-4">
-              This will mark the ticket as Resolved and set the end time to {tempEndTimeHour}:{tempEndTimeMinute} {tempEndTimeAMPM}.
-            </p>
-            <div className="flex gap-2">
-              <button
-                onClick={async () => {
-                  setShowFinalizeConfirm(false)
-                  await handleTroubleshootingPendingSave(troubleshootingTicket!.ticketid, false)
-                }}
-                disabled={savingTicket === troubleshootingTicket?.ticketid}
-                className="flex-1 px-4 py-2 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors"
-              >
-                No, just save
-              </button>
-              <button
-                onClick={async () => {
-                  await handleTroubleshootingPendingSave(troubleshootingTicket!.ticketid, true)
-                }}
-                disabled={savingTicket === troubleshootingTicket?.ticketid}
-                className="flex-1 px-4 py-2 rounded-lg bg-success text-on-success hover:bg-success/90 transition-colors disabled:opacity-50"
-              >
-                Yes, finalize
-              </button>
-            </div>
-          </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )

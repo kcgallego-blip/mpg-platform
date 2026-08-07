@@ -185,6 +185,49 @@ export async function updateTicket(ticketId: number, updates: Partial<Database['
   return data
 }
 
+export type TicketWorkflowRequest =
+  | { action: 'pending'; assistedBy: string }
+  | { action: 'solve'; assistedBy?: string; troubleshooting: string }
+  | { action: 'add_note'; note: string }
+  | { action: 'save_troubleshooting'; troubleshooting: string }
+  | { action: 'set_reported'; reported: boolean }
+
+export async function runTicketWorkflow(ticketId: number, request: TicketWorkflowRequest) {
+  const response = await fetch(`/api/tickets/${ticketId}/workflow`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify(request),
+  })
+
+  const result = await response.json().catch(() => null) as
+    | { ticket?: Database['public']['Tables']['tickets']['Row']; error?: string }
+    | null
+
+  if (!response.ok || !result?.ticket) {
+    throw new Error(result?.error || 'Unable to update the ticket')
+  }
+
+  return result.ticket
+}
+
+export async function deleteOpenTicket(ticketId: number) {
+  const response = await fetch(`/api/tickets/${ticketId}/workflow`, {
+    method: 'DELETE',
+    credentials: 'same-origin',
+  })
+
+  const result = await response.json().catch(() => null) as
+    | { ticketId?: number; error?: string }
+    | null
+
+  if (!response.ok || result?.ticketId !== ticketId) {
+    throw new Error(result?.error || 'Unable to delete the ticket')
+  }
+
+  return result.ticketId
+}
+
 // ============================================================================
 // ANALYTICS FUNCTIONS
 // ============================================================================

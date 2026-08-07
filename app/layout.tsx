@@ -1,4 +1,5 @@
 import '@/styles/globals.css'
+import AuthSessionManager from '@/components/AuthSessionManager'
 
 export const metadata = {
   title: 'CLAD Portal',
@@ -22,6 +23,7 @@ export default function RootLayout({
         />
       </head>
       <body className="bg-white text-on-surface font-inter relative min-h-screen" suppressHydrationWarning>
+        <AuthSessionManager />
         {/* Mesh Gradient Background - Very light colors */}
         <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none">
           <div className="absolute inset-0 bg-gradient-to-br from-white via-blue-50/20 to-white" />
