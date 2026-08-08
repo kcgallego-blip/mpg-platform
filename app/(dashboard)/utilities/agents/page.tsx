@@ -4,9 +4,18 @@ import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from '
 import * as XLSX from 'xlsx'
 import { supabase } from '@/lib/supabase'
 import type { Database } from '@/lib/supabase'
+import AgentReconciliationModal, {
+  ReconciliationPlan,
+} from '@/components/agents/AgentReconciliationModal'
 import {
-  AlertTriangle,
-  FileUp,
+  EXPECTED_AGENT_IMPORT_FILE,
+  ImportedAgent,
+  ImportedAgentMatch,
+  matchImportedAgents,
+  normalizeAgentName,
+  parseAgentScheduleMatrix,
+} from '@/lib/agentsImport'
+import {
   Pencil,
   Plus,
   RefreshCw,
@@ -22,19 +31,19 @@ type AgentInsert = Database['public']['Tables']['agents']['Insert']
 type AgentField = keyof Omit<AgentInsert, 'present'>
 type AgentFormField = Exclude<AgentField, 'name'>
 
-type CsvAgent = { name: string } & Partial<Record<AgentField, string | null>>
-
 type ImportPreview = {
   fileName: string
-  rows: CsvAgent[]
-  missing: AgentRow[]
+  rows: ImportedAgent[]
+  automaticMatches: ImportedAgentMatch[]
+  unmatchedNew: ImportedAgent[]
+  missingOld: AgentRow[]
 }
 
 type AgentFormState = Record<AgentField, string>
 
 const agentFormFields: AgentFormField[] = [
+  'email',
   'team_leader',
-  'setting',
   'role',
   'off_1',
   'off_2',
@@ -45,8 +54,8 @@ const agentFormFields: AgentFormField[] = [
 
 const fieldLabels: Record<AgentField, string> = {
   name: 'Agent Name',
+  email: 'Email',
   team_leader: 'Team Leader',
-  setting: 'Setting',
   role: 'Role',
   off_1: 'Day OFF 1',
   off_2: 'Day OFF 2',
@@ -57,8 +66,8 @@ const fieldLabels: Record<AgentField, string> = {
 
 const emptyForm: AgentFormState = {
   name: '',
+  email: '',
   team_leader: '',
-  setting: '',
   role: '',
   off_1: '',
   off_2: '',
@@ -67,40 +76,7 @@ const emptyForm: AgentFormState = {
   comments: '',
 }
 
-const csvHeaderMap: Record<string, AgentField> = {
-  agentname: 'name',
-  name: 'name',
-  supervisor: 'team_leader',
-  teamleader: 'team_leader',
-  leader: 'team_leader',
-  setting: 'setting',
-  role: 'role',
-  dayoff1: 'off_1',
-  dayoffone: 'off_1',
-  dayoff2: 'off_2',
-  dayofftwo: 'off_2',
-  startshift: 'start_shift',
-  endshift: 'end_shift',
-  comments: 'comments',
-  comment: 'comments',
-}
-
-const normalizeHeader = (header: string) =>
-  header
-    .trim()
-    .replace(/^\uFEFF/, '')
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9]+/g, '')
-
-const normalizeName = (value: string | null | undefined) =>
-  (value || '')
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim()
+const normalizeName = normalizeAgentName
 
 const getNameTokens = (value: string | null | undefined) =>
   Array.from(new Set(normalizeName(value).split(/\s+/).filter(Boolean)))
@@ -246,89 +222,7 @@ const getFuzzyNameScore = (agentName: string, query: string) => {
   return 0
 }
 
-const parseCsvLine = (line: string) => {
-  const values: string[] = []
-  let current = ''
-  let inQuotes = false
-
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index]
-    const nextChar = line[index + 1]
-
-    if (char === '"' && nextChar === '"') {
-      current += '"'
-      index += 1
-      continue
-    }
-
-    if (char === '"') {
-      inQuotes = !inQuotes
-      continue
-    }
-
-    if (char === ',' && !inQuotes) {
-      values.push(current.trim())
-      current = ''
-      continue
-    }
-
-    current += char
-  }
-
-  values.push(current.trim())
-  return values
-}
-
-const parseCsvAgents = (csvContent: string): CsvAgent[] => {
-  const lines = csvContent
-    .replace(/^\uFEFF/, '')
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n')
-    .split('\n')
-    .map(line => line.trim())
-    .filter(Boolean)
-
-  if (lines.length < 2) {
-    throw new Error('CSV must include a header row and at least one agent row')
-  }
-
-  const headers = parseCsvLine(lines[0]).map(normalizeHeader)
-  const rows: CsvAgent[] = []
-  const seenNames = new Set<string>()
-
-  for (let lineIndex = 1; lineIndex < lines.length; lineIndex += 1) {
-    const values = parseCsvLine(lines[lineIndex])
-    const record: Partial<Record<AgentField, string | null>> = {}
-
-    headers.forEach((header, index) => {
-      const field = csvHeaderMap[header]
-      if (!field) return
-
-      const value = values[index]?.trim()
-      record[field] = value === undefined || value === '' ? null : value
-    })
-
-    const name = typeof record.name === 'string' ? record.name.trim() : ''
-    if (!name) continue
-
-    const normalizedName = normalizeName(name)
-    if (seenNames.has(normalizedName)) {
-      throw new Error(`Duplicate agent name in CSV: ${name}`)
-    }
-
-    seenNames.add(normalizedName)
-    record.name = name
-    rows.push(record as CsvAgent)
-  }
-
-  if (rows.length === 0) {
-    throw new Error('CSV must include an Agent Name column with at least one agent')
-  }
-
-  return rows
-}
-
-const buildAgentPayload = (row: CsvAgent): AgentInsert => {
+const buildAgentPayload = (row: ImportedAgent): AgentInsert => {
   const payload: Record<string, string | null> = { name: row.name }
 
   agentFormFields.forEach(field => {
@@ -343,8 +237,8 @@ const buildAgentPayload = (row: CsvAgent): AgentInsert => {
 
 const agentToForm = (agent: AgentRow): AgentFormState => ({
   name: agent.name,
+  email: agent.email || '',
   team_leader: agent.team_leader || '',
-  setting: agent.setting || '',
   role: agent.role || '',
   off_1: agent.off_1 || '',
   off_2: agent.off_2 || '',
@@ -426,18 +320,6 @@ export default function AgentsPage() {
       .map(({ agent }) => agent)
   }, [agents, searchQuery])
 
-  const updateImportPreviewMissing = useCallback((nextAgents: AgentRow[]) => {
-    setImportPreview(current => {
-      if (!current) return current
-
-      const csvNames = new Set(current.rows.map(row => normalizeName(row.name)))
-      return {
-        ...current,
-        missing: nextAgents.filter(agent => !csvNames.has(normalizeName(agent.name))),
-      }
-    })
-  }, [])
-
   const openAgentForm = (agent?: AgentRow) => {
     setEditingName(agent?.name || null)
     setFormState(agent ? agentToForm(agent) : emptyForm)
@@ -461,8 +343,7 @@ export default function AgentsPage() {
 
       if (deleteError) throw deleteError
 
-      const nextAgents = await fetchAgents()
-      updateImportPreviewMissing(nextAgents)
+      await fetchAgents()
       setSuccessMessage(`${agent.name} was deleted permanently`)
     } catch (err: any) {
       console.error('Failed to delete agent:', err)
@@ -489,17 +370,9 @@ export default function AgentsPage() {
     try {
       const payload = formToPayload(formState)
 
-      if (editingName && normalizeName(editingName) !== normalizeName(nextName)) {
-        const { error: insertError } = await supabase.from('agents').insert(payload).select().single()
-        if (insertError) throw insertError
-
-        const { error: deleteError } = await supabase
-          .from('agents')
-          .delete()
-          .eq('name', editingName)
-
-        if (deleteError) throw deleteError
-      } else if (editingName) {
+      if (editingName) {
+        // Updating the primary key in place preserves `present`. Recreating the
+        // row on rename would reset attendance, which this page must never do.
         const { error: updateError } = await supabase
           .from('agents')
           .update(payload)
@@ -513,8 +386,7 @@ export default function AgentsPage() {
         if (insertError) throw insertError
       }
 
-      const nextAgents = await fetchAgents()
-      updateImportPreviewMissing(nextAgents)
+      await fetchAgents()
       setSuccessMessage(editingName ? 'Agent updated' : 'Agent created')
       closeAgentForm()
     } catch (err: any) {
@@ -525,18 +397,6 @@ export default function AgentsPage() {
     }
   }
 
-  const handleImportCsv = async (csvContent: string, fileName: string) => {
-    const rows = parseCsvAgents(csvContent)
-    const csvNames = new Set(rows.map(row => normalizeName(row.name)))
-    const missing = agents.filter(agent => !csvNames.has(normalizeName(agent.name)))
-
-    setImportPreview({
-      fileName,
-      rows,
-      missing,
-    })
-  }
-
   const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (!file) return
@@ -544,27 +404,31 @@ export default function AgentsPage() {
     try {
       setError(null)
       setSuccessMessage(null)
-      const fileName = file.name.toLowerCase()
-
-      let csvContent: string
-      if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
-        const arrayBuffer = await file.arrayBuffer()
-        const workbook = XLSX.read(arrayBuffer, { type: 'array' })
-        const firstSheetName = workbook.SheetNames[0]
-        const worksheet = workbook.Sheets[firstSheetName]
-        const jsonSheet = XLSX.utils.sheet_to_json<string[]>(worksheet, { header: 1 })
-        const lines: string[] = []
-        jsonSheet.forEach((row) => {
-          if (Array.isArray(row)) {
-            lines.push(row.map(cell => String(cell ?? '')).join(','))
-          }
-        })
-        csvContent = lines.join('\n')
-      } else {
-        csvContent = await file.text()
+      if (file.name !== EXPECTED_AGENT_IMPORT_FILE) {
+        throw new Error(`Select the schedule file named exactly "${EXPECTED_AGENT_IMPORT_FILE}"`)
       }
 
-      await handleImportCsv(csvContent, file.name)
+      const arrayBuffer = await file.arrayBuffer()
+      const workbook = XLSX.read(arrayBuffer, { type: 'array' })
+      const firstSheetName = workbook.SheetNames[0]
+      const worksheet = firstSheetName ? workbook.Sheets[firstSheetName] : null
+      if (!worksheet) throw new Error('The schedule file does not contain a readable sheet')
+
+      const matrix = XLSX.utils.sheet_to_json<unknown[]>(worksheet, {
+        header: 1,
+        raw: false,
+        defval: '',
+      })
+      const rows = parseAgentScheduleMatrix(matrix)
+      const reconciliation = matchImportedAgents(rows, agents, getFuzzyNameScore)
+
+      setImportPreview({
+        fileName: file.name,
+        rows,
+        automaticMatches: reconciliation.matches,
+        unmatchedNew: reconciliation.unmatchedNew,
+        missingOld: reconciliation.missingOld,
+      })
     } catch (err: any) {
       console.error('Failed to import file:', err)
       setError(err.message || 'Failed to import file')
@@ -573,58 +437,47 @@ export default function AgentsPage() {
     }
   }
 
-  const handleApplyImport = async () => {
+  const handleFinalizeImport = async (plan: ReconciliationPlan) => {
     if (!importPreview) return
 
     setIsImporting(true)
     setError(null)
 
     try {
-      const batchSize = 50
-      let imported = 0
+      const allMatches = [
+        ...importPreview.automaticMatches.map(match => ({
+          incoming: match.incoming,
+          existingName: match.existingName,
+        })),
+        ...plan.manualMatches,
+      ]
+      const updates = allMatches.map(match => ({
+        existing_name: match.existingName,
+        ...buildAgentPayload(match.incoming),
+      }))
+      const newAgents = plan.newAgents.map(buildAgentPayload)
 
-      for (let index = 0; index < importPreview.rows.length; index += batchSize) {
-        const batch = importPreview.rows.slice(index, index + batchSize)
-        const payloadBatch = batch.map(buildAgentPayload)
-        const { error: upsertError } = await supabase
-          .from('agents')
-          .upsert(payloadBatch, { onConflict: 'name' })
-          .select()
+      // One Postgres function keeps updates, additions, and permanent deletions
+      // atomic. Its SQL column lists intentionally exclude `present`.
+      const { error: reconcileError } = await supabase.rpc('reconcile_agents', {
+        p_updates: updates,
+        p_new_agents: newAgents,
+        p_delete_names: plan.deleteNames,
+      })
 
-        if (upsertError) throw upsertError
-        imported += batch.length
-      }
+      if (reconcileError) throw reconcileError
 
-      const nextAgents = await fetchAgents()
-      updateImportPreviewMissing(nextAgents)
+      const importedFileName = importPreview.fileName
       setImportPreview(null)
-      setSuccessMessage(`Imported ${imported} agents from ${importPreview.fileName}`)
+      await fetchAgents()
+      setSuccessMessage(
+        `Finalized ${importPreview.rows.length} agents from ${importedFileName}: ${updates.length} updated, ${newAgents.length} added, ${plan.deleteNames.length} deleted.`
+      )
     } catch (err: any) {
-      console.error('Failed to apply CSV import:', err)
-      setError(err.message || 'Failed to import agents')
+      console.error('Failed to finalize agent reconciliation:', err)
+      setError(err.message || 'Failed to reconcile agents')
     } finally {
       setIsImporting(false)
-    }
-  }
-
-  const handleDeleteAllMissing = async () => {
-    if (!importPreview?.missing.length) return
-    if (!window.confirm(`Delete ${importPreview.missing.length} agents permanently?`)) return
-
-    try {
-      const { error: deleteError } = await supabase
-        .from('agents')
-        .delete()
-        .in('name', importPreview.missing.map(agent => agent.name))
-
-      if (deleteError) throw deleteError
-
-      const nextAgents = await fetchAgents()
-      updateImportPreviewMissing(nextAgents)
-      setSuccessMessage(`Deleted ${importPreview.missing.length} agents permanently`)
-    } catch (err: any) {
-      console.error('Failed to delete missing agents:', err)
-      setError(err.message || 'Failed to delete missing agents')
     }
   }
 
@@ -636,7 +489,7 @@ export default function AgentsPage() {
             Agents
           </h1>
           <p className="text-on-surface-variant">
-            Manage agent roles, schedules, comments, and team leaders.
+            Manage agent emails, roles, schedules, comments, and team leaders.
           </p>
         </div>
         <div className="flex flex-wrap gap-3">
@@ -671,7 +524,7 @@ export default function AgentsPage() {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".csv,text/csv,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+        accept=".csv,text/csv"
         className="hidden"
         onChange={handleFileChange}
       />
@@ -711,10 +564,10 @@ export default function AgentsPage() {
         </div>
       ) : (
         <div className="overflow-x-auto rounded-xl">
-          <table className="w-full min-w-[1100px]">
+          <table className="w-full min-w-[1400px]">
             <thead className="bg-surface-container-low">
               <tr>
-                {['name', 'role', 'team_leader', 'off_1', 'off_2', 'start_shift', 'end_shift', 'comments'].map(field => (
+                {['name', 'email', 'role', 'team_leader', 'off_1', 'off_2', 'start_shift', 'end_shift', 'comments'].map(field => (
                   <th key={field} className="px-4 py-3 text-left text-label-sm font-semibold text-on-surface-variant">
                     {fieldLabels[field as AgentField]}
                   </th>
@@ -729,6 +582,9 @@ export default function AgentsPage() {
                 <tr key={agent.name} className="hover:bg-surface-container-high/50 transition-colors">
                   <td className="px-4 py-3 text-sm text-on-surface">
                     <span className="block max-w-[16rem] truncate" title={agent.name}>{agent.name}</span>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-on-surface">
+                    <span className="block max-w-[16rem] truncate" title={agent.email || ''}>{formatValue(agent.email)}</span>
                   </td>
                   <td className="px-4 py-3 text-sm text-on-surface">{formatValue(agent.role)}</td>
                   <td className="px-4 py-3 text-sm text-on-surface">{formatValue(agent.team_leader)}</td>
@@ -769,98 +625,16 @@ export default function AgentsPage() {
       )}
 
       {importPreview && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setImportPreview(null)}>
-          <div className="bg-surface rounded-xl p-6 max-w-3xl w-full max-h-[90vh] overflow-y-auto" onClick={(event) => event.stopPropagation()}>
-            <div className="flex items-start justify-between gap-4 mb-4">
-              <div>
-                <h3 className="font-hanken text-headline-md font-bold text-on-surface mb-1">
-                  Review Import
-                </h3>
-                <p className="text-on-surface-variant text-sm">
-                  {importPreview.fileName} contains {importPreview.rows.length} agent rows.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setImportPreview(null)}
-                className="text-on-surface-variant hover:text-on-surface"
-              >
-                <X size={20} />
-              </button>
-            </div>
-
-            {importPreview.missing.length > 0 && (
-              <div className="mb-5 p-4 rounded-xl bg-error/10 border border-error/20">
-                <div className="flex items-start gap-3">
-                  <AlertTriangle className="text-error shrink-0 mt-0.5" size={20} />
-                  <div>
-                    <p className="font-medium text-error mb-2">
-                      {importPreview.missing.length} database agent{importPreview.missing.length === 1 ? '' : 's'} not present in this CSV.
-                    </p>
-                    <p className="text-sm text-on-surface-variant mb-3">
-                      Choose Delete to permanently remove them, or Edit to manually modify and keep them.
-                    </p>
-                    <div className="space-y-2">
-                      {importPreview.missing.map(agent => (
-                        <div key={agent.name} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between rounded-lg bg-surface p-3 border border-outline-variant/30">
-                          <div>
-                            <p className="font-medium text-on-surface">{agent.name}</p>
-                            <p className="text-xs text-on-surface-variant">
-                              {formatValue(agent.role)} · {formatValue(agent.team_leader)} · {formatValue(agent.start_shift)}-{formatValue(agent.end_shift)}
-                            </p>
-                          </div>
-                          <div className="flex gap-2">
-                            <button
-                              type="button"
-                              onClick={() => openAgentForm(agent)}
-                              className="px-3 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-on-surface transition-colors text-xs font-medium"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteAgent(agent)}
-                              className="px-3 py-1.5 rounded-lg bg-error/10 hover:bg-error/20 text-error transition-colors text-xs font-medium"
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleDeleteAllMissing}
-                      className="mt-3 w-full px-4 py-2 rounded-lg bg-error text-on-error hover:bg-error/90 transition-colors text-sm font-medium"
-                    >
-                      Delete All Missing Agents
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
-              <button
-                type="button"
-                onClick={() => setImportPreview(null)}
-                disabled={isImporting}
-                className="px-4 py-2 rounded-lg text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleApplyImport}
-                disabled={isImporting}
-                className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-primary text-on-primary hover:bg-primary/90 transition-colors disabled:opacity-50"
-              >
-                {isImporting ? <RefreshCw size={18} className="animate-spin" /> : <FileUp size={18} />}
-                {isImporting ? 'Importing...' : 'Apply Import'}
-              </button>
-            </div>
-          </div>
-        </div>
+        <AgentReconciliationModal
+          fileName={importPreview.fileName}
+          totalRows={importPreview.rows.length}
+          automaticMatchCount={importPreview.automaticMatches.length}
+          unmatchedNew={importPreview.unmatchedNew}
+          missingOld={importPreview.missingOld}
+          isSubmitting={isImporting}
+          onClose={() => setImportPreview(null)}
+          onFinalize={handleFinalizeImport}
+        />
       )}
 
       {formModalOpen && (
@@ -899,7 +673,7 @@ export default function AgentsPage() {
                     />
                   ) : (
                     <input
-                      type="text"
+                      type={field === 'email' ? 'email' : 'text'}
                       value={formState[field]}
                       onChange={(event) => setFormState(current => ({ ...current, [field]: event.target.value }))}
                       className="w-full px-4 py-3 rounded-lg bg-surface-container-low/50 border border-outline-variant/50 text-on-surface focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"

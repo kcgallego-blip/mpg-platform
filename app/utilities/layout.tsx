@@ -7,6 +7,7 @@ import { useEffect } from 'react'
 import Navigation from '@/components/Navigation'
 import { useFeatureSettingsStore } from '@/lib/featureSettingsStore'
 import { useRequireAuth } from '@/lib/useRequireAuth'
+import { getPostLoginRoute } from '@/lib/routes'
 
 export default function UtilitiesLayout({ children }: { children: ReactNode }) {
   const { user, isReady } = useRequireAuth()
@@ -54,10 +55,10 @@ export default function UtilitiesLayout({ children }: { children: ReactNode }) {
               Controls are available only to users with the Admin role.
             </p>
             <Link
-              href="/dashboard"
+              href={getPostLoginRoute(user?.role)}
               className="mt-6 inline-flex rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-on-primary transition-colors hover:bg-primary/90"
             >
-              Return to dashboard
+              Return home
             </Link>
           </div>
         </main>

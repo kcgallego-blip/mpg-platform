@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { CalendarDays, Clock, LogIn, LogOut, UserX, Users, Grid3x3, Table2 } from 'lucide-react'
 import { useAuthStore } from '@/lib/authStore'
-import { useRouter } from 'next/navigation'
 
 type ScheduleAgent = {
   id: string
@@ -196,16 +195,8 @@ const normalizeNameValue = (value: string | null | undefined) =>
     .replace(/[^a-z0-9]+/g, '')
     .trim()
 
-export default function DashboardPage() {
+export default function StaffingPage() {
   const { user } = useAuthStore()
-  const router = useRouter()
-
-  // Redirect Agent role to /dashboard/agent
-  useEffect(() => {
-    if (user?.role === 'Agent') {
-      router.replace('/dashboard/agent')
-    }
-  }, [user?.role, router])
 
   const [agents, setAgents] = useState<ScheduleAgent[]>([])
   const [supervisors, setSupervisors] = useState<string[]>([])

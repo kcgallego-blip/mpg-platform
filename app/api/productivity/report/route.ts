@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthenticatedDbUser } from '@/lib/sessionAuth'
 import { PRODUCTIVITY_REPORT_ROLES } from '@/lib/productivityReport'
+import { getProductivityReportEnabled } from '@/lib/featureSettings'
 import { getProductivityReport } from '@/lib/productivityReportService'
 import { generateProductivityReportPdf } from '@/lib/productivityReportPdf'
 
@@ -34,6 +35,13 @@ export async function GET(request: NextRequest) {
     ) {
       return NextResponse.json(
         { error: 'Productivity reports are available only to management roles' },
+        { status: 403 }
+      )
+    }
+
+    if (!(await getProductivityReportEnabled())) {
+      return NextResponse.json(
+        { error: 'Productivity PDF reports are currently disabled' },
         { status: 403 }
       )
     }

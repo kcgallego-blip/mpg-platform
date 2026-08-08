@@ -404,7 +404,7 @@ export default function StatsPage() {
             userRole?.toLowerCase() === 'admin' ||
             userRole?.toLowerCase() === 'manager') && (
             <button
-              onClick={() => router.push('/dashboard/stats/upload')}
+              onClick={() => router.push('/stats/upload')}
               className="flex items-center gap-2 rounded-lg bg-primary-container px-6 py-2.5 font-medium text-on-primary-container transition hover:opacity-90 whitespace-nowrap"
             >
               <Upload size={18} />

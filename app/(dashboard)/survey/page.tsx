@@ -13,7 +13,6 @@ import {
   Upload,
   X,
 } from 'lucide-react'
-import Navigation from '@/components/Navigation'
 import { useRequireAuth } from '@/lib/useRequireAuth'
 
 type SurveyRow = {
@@ -358,7 +357,7 @@ export default function SurveyPage() {
 
   if (!isReady || isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
+      <div className="flex min-h-[400px] items-center justify-center">
         <div className="text-center">
           <Loader2 size={48} className="mx-auto mb-4 animate-spin text-primary-container" />
           <p className="text-on-surface-variant">Loading survey...</p>
@@ -370,10 +369,7 @@ export default function SurveyPage() {
   if (!user) return null
 
   return (
-    <div className="min-h-screen relative">
-      <Navigation />
-      <main className="ml-64 pt-8 px-gutter max-w-container">
-        <div className="space-y-6 pb-8">
+    <div className="space-y-6 pb-8">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <p className="text-label-md font-semibold uppercase text-primary-container">Survey</p>
@@ -667,8 +663,6 @@ export default function SurveyPage() {
               )}
             </>
           )}
-        </div>
-      </main>
     </div>
   )
 }

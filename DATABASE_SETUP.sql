@@ -38,6 +38,10 @@ insert into public.feature_settings (key, enabled)
 values ('attendance_route_enabled', false)
 on conflict (key) do nothing;
 
+insert into public.feature_settings (key, enabled)
+values ('productivity_report_enabled', true)
+on conflict (key) do nothing;
+
 alter table public.feature_settings enable row level security;
 
 comment on table public.feature_settings is 'Server-managed application feature switches';

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowDownUp, BarChart3, CalendarDays, Clock3, Download, Loader2, RefreshCw, Table2, X } from 'lucide-react'
 import { useAuthStore } from '@/lib/authStore'
+import { useFeatureSettingsStore } from '@/lib/featureSettingsStore'
 import { supabase } from '@/lib/supabase'
 import {
   TPH_STATUS_DISPLAY_COLUMNS,
@@ -221,6 +222,13 @@ const CompactHourlyStrip = ({
 
 export default function ProductivityPage() {
   const { user } = useAuthStore()
+  const productivityReportEnabled = useFeatureSettingsStore(
+    (state) => state.productivityReportEnabled
+  )
+  const featureSettingsLoadedFor = useFeatureSettingsStore(
+    (state) => state.loadedFor
+  )
+  const loadFeatureSettings = useFeatureSettingsStore((state) => state.load)
   const [tickets, setTickets] = useState<TphTicket[]>([])
   const [productivityRows, setProductivityRows] = useState<AgentProductivity[]>([])
   const [dataSource, setDataSource] = useState<TphDataSource>('tph')
@@ -415,6 +423,12 @@ export default function ProductivityPage() {
   }, [loadProductivity])
 
   useEffect(() => {
+    if (user?.email) {
+      void loadFeatureSettings(user.email)
+    }
+  }, [loadFeatureSettings, user?.email])
+
+  useEffect(() => {
     setSortedAgentSummaries([])
   }, [selectedShiftDate, selectedStatus])
 
@@ -555,9 +569,10 @@ export default function ProductivityPage() {
 
   const selectedAgent = displayedProductivityRows.find((row) => row.email === selectedAgentEmail)
   const sourceLabel = dataSource === 'tph' ? 'raw TPH rows' : 'TPH summary rows'
-  const canDownloadReport = ['Admin', 'Supervisor', 'Operations Manager', 'Team Leader'].includes(
-    user?.role || ''
-  )
+  const canDownloadReport =
+    featureSettingsLoadedFor === user?.email &&
+    productivityReportEnabled &&
+    ['Admin', 'Supervisor', 'Operations Manager', 'Team Leader'].includes(user?.role || '')
 
   if (isLoading) {
     return (

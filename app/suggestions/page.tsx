@@ -147,10 +147,10 @@ export default function SuggestionsPage() {
             Suggestions are available only to users with the Agent or Admin role.
           </p>
           <Link
-            href="/dashboard"
+            href="/staffing"
             className="mt-6 inline-flex rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-on-primary transition-colors hover:bg-primary/90"
           >
-            Return to dashboard
+            Return to Staffing
           </Link>
         </div>
       </div>

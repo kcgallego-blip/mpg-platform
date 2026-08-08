@@ -7,6 +7,7 @@ import Navigation from '@/components/Navigation'
 import { useFeatureSettingsStore } from '@/lib/featureSettingsStore'
 import { useRequireAuth } from '@/lib/useRequireAuth'
 import { useEffect } from 'react'
+import { getPostLoginRoute } from '@/lib/routes'
 
 export default function AttendanceLayout({ children }: { children: ReactNode }) {
   const { user, isReady } = useRequireAuth()
@@ -50,10 +51,10 @@ export default function AttendanceLayout({ children }: { children: ReactNode }) 
               The public Attendance route is currently disabled by an administrator.
             </p>
             <Link
-              href="/dashboard"
+              href={getPostLoginRoute(user?.role)}
               className="mt-6 inline-flex rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-on-primary transition-colors hover:bg-primary/90"
             >
-              Return to dashboard
+              Return home
             </Link>
           </div>
         </main>

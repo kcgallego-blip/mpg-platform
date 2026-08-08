@@ -2,6 +2,7 @@ import 'server-only'
 
 import {
   ATTENDANCE_ROUTE_SETTING_KEY,
+  PRODUCTIVITY_REPORT_SETTING_KEY,
   canRoleAccessAttendance,
 } from './featureAccess'
 import { supabaseAdmin } from './supabaseAdmin'
@@ -18,6 +19,21 @@ export async function getAttendanceRouteEnabled() {
   }
 
   return data?.enabled === true
+}
+
+export async function getProductivityReportEnabled() {
+  const { data, error } = await supabaseAdmin
+    .from('feature_settings')
+    .select('enabled')
+    .eq('key', PRODUCTIVITY_REPORT_SETTING_KEY)
+    .maybeSingle()
+
+  if (error) {
+    throw error
+  }
+
+  // Preserve the report's existing availability until the setting is created.
+  return data?.enabled !== false
 }
 
 export async function canUserAccessAttendance(role: string | null | undefined) {

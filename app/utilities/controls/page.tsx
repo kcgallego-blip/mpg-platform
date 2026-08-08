@@ -10,6 +10,9 @@ export default function ControlsPage() {
   const attendanceRouteEnabled = useFeatureSettingsStore(
     (state) => state.attendanceRouteEnabled
   )
+  const productivityReportEnabled = useFeatureSettingsStore(
+    (state) => state.productivityReportEnabled
+  )
   const loadedFor = useFeatureSettingsStore((state) => state.loadedFor)
   const loading = useFeatureSettingsStore((state) => state.loading)
   const saving = useFeatureSettingsStore((state) => state.saving)
@@ -17,6 +20,9 @@ export default function ControlsPage() {
   const loadFeatureSettings = useFeatureSettingsStore((state) => state.load)
   const updateAttendanceRoute = useFeatureSettingsStore(
     (state) => state.updateAttendanceRoute
+  )
+  const updateProductivityReport = useFeatureSettingsStore(
+    (state) => state.updateProductivityReport
   )
 
   useEffect(() => {
@@ -27,11 +33,21 @@ export default function ControlsPage() {
 
   const isReady = loadedFor === user?.email
 
-  const handleToggle = async () => {
+  const handleAttendanceToggle = async () => {
     if (!user?.email || saving) return
 
     try {
       await updateAttendanceRoute(user.email, !attendanceRouteEnabled)
+    } catch {
+      // The store exposes the API error beside the switch.
+    }
+  }
+
+  const handleProductivityReportToggle = async () => {
+    if (!user?.email || saving) return
+
+    try {
+      await updateProductivityReport(user.email, !productivityReportEnabled)
     } catch {
       // The store exposes the API error beside the switch.
     }
@@ -71,7 +87,7 @@ export default function ControlsPage() {
             Feature Toggles
           </h2>
           <p className="mt-1 text-sm text-on-surface-variant">
-            Control which optional routes are available outside the Admin role.
+            Control which optional routes and actions are available to users.
           </p>
         </div>
 
@@ -93,7 +109,7 @@ export default function ControlsPage() {
             aria-describedby="attendance-toggle-description"
             aria-label="Enable Public Attendance Route"
             disabled={!isReady || loading || saving}
-            onClick={() => void handleToggle()}
+            onClick={() => void handleAttendanceToggle()}
             className={`relative inline-flex h-8 w-14 flex-none items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
               isReady && attendanceRouteEnabled ? 'bg-primary' : 'bg-outline-variant'
             }`}
@@ -102,6 +118,38 @@ export default function ControlsPage() {
               aria-hidden="true"
               className={`h-6 w-6 rounded-full bg-white shadow-sm transition-transform ${
                 isReady && attendanceRouteEnabled ? 'translate-x-7' : 'translate-x-1'
+              }`}
+            />
+          </button>
+        </div>
+
+        <div className="flex flex-col gap-5 border-t border-outline/15 px-6 py-6 sm:flex-row sm:items-center sm:justify-between">
+          <div className="max-w-2xl">
+            <h3 className="font-semibold text-on-surface">
+              Show Productivity PDF Report
+            </h3>
+            <p id="productivity-report-toggle-description" className="mt-1 text-sm text-on-surface-variant">
+              When enabled, PDF Report appears on Productivity for approved
+              management roles. When disabled, the report is hidden for everyone.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            role="switch"
+            aria-checked={isReady && productivityReportEnabled}
+            aria-describedby="productivity-report-toggle-description"
+            aria-label="Show Productivity PDF Report"
+            disabled={!isReady || loading || saving}
+            onClick={() => void handleProductivityReportToggle()}
+            className={`relative inline-flex h-8 w-14 flex-none items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
+              isReady && productivityReportEnabled ? 'bg-primary' : 'bg-outline-variant'
+            }`}
+          >
+            <span
+              aria-hidden="true"
+              className={`h-6 w-6 rounded-full bg-white shadow-sm transition-transform ${
+                isReady && productivityReportEnabled ? 'translate-x-7' : 'translate-x-1'
               }`}
             />
           </button>
@@ -120,9 +168,11 @@ export default function ControlsPage() {
                 ? 'Saving change...'
                 : loading || !isReady
                   ? 'Loading current setting...'
-                  : attendanceRouteEnabled
-                    ? 'Attendance is available to all assigned roles.'
-                    : 'Attendance is available to Admins only.'}
+                  : 'Attendance is ' +
+                    (attendanceRouteEnabled ? 'public' : 'Admin-only') +
+                    '; Productivity PDF Report is ' +
+                    (productivityReportEnabled ? 'shown' : 'hidden') +
+                    '.'}
             </p>
           )}
         </div>

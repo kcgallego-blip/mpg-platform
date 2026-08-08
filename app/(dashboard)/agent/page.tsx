@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuthStore } from '@/lib/authStore'
 import { supabase } from '@/lib/supabase'
-import { BarChart3, CalendarDays, Clock3, Gauge, Loader2, RefreshCw, Sigma, Ticket } from 'lucide-react'
+import { AlertTriangle, BarChart3, CalendarDays, Clock3, Gauge, Loader2, RefreshCw, Sigma, Ticket, X } from 'lucide-react'
 import {
   TPH_STATUS_COLUMNS,
   TphDataSource,
@@ -113,6 +113,22 @@ const getHeatMapColor = (count: number) => {
   return `rgb(${r}, ${g}, 68)`
 }
 
+const getTicketDataSnapshot = (
+  tickets: TphTicket[],
+  statusCounts: Record<string, number>,
+  hourlyCounts: Record<string, number>
+) => JSON.stringify({
+  tickets: tickets
+    .map(({ ticket_num, status }) => [ticket_num, status])
+    .sort(([firstTicketNumber], [secondTicketNumber]) =>
+      Number(firstTicketNumber) - Number(secondTicketNumber)
+    ),
+  statuses: TPH_STATUS_COLUMNS.map((status) => [status, statusCounts[status] || 0]),
+  hours: Object.entries(hourlyCounts).sort(([firstHour], [secondHour]) =>
+    firstHour.localeCompare(secondHour)
+  ),
+})
+
 const HourlyBarChart = ({
   values,
   maxValue,
@@ -162,7 +178,7 @@ const HourlyBarChart = ({
   )
 }
 
-export default function AgentDashboardPage() {
+export default function AgentPage() {
   const { user } = useAuthStore()
   const [tickets, setTickets] = useState<TphTicket[]>([])
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({})
@@ -171,10 +187,35 @@ export default function AgentDashboardPage() {
   const [showHourlyBreakdown, setShowHourlyBreakdown] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [showNoNewTicketsModal, setShowNoNewTicketsModal] = useState(false)
   const [error, setError] = useState('')
   const [selectedShiftDate, setSelectedShiftDate] = useState(() => getDateKey(getShiftDate(new Date())))
   const currentShiftDate = getDateKey(getShiftDate(new Date()))
   const dateInputRef = useRef<HTMLInputElement>(null)
+  const closeModalButtonRef = useRef<HTMLButtonElement>(null)
+  const lastTicketDataSnapshotRef = useRef<string | null>(null)
+  const unchangedRefreshCountRef = useRef(0)
+
+  const trackRefreshResult = useCallback((snapshot: string, isInitialLoad: boolean) => {
+    if (isInitialLoad) {
+      lastTicketDataSnapshotRef.current = snapshot
+      unchangedRefreshCountRef.current = 0
+      return
+    }
+
+    if (lastTicketDataSnapshotRef.current === snapshot) {
+      unchangedRefreshCountRef.current += 1
+
+      if (unchangedRefreshCountRef.current >= 3) {
+        setShowNoNewTicketsModal(true)
+        unchangedRefreshCountRef.current = 0
+      }
+    } else {
+      unchangedRefreshCountRef.current = 0
+    }
+
+    lastTicketDataSnapshotRef.current = snapshot
+  }, [])
 
   const loadTickets = useCallback(async (showFullLoader = false) => {
     if (!user?.email) {
@@ -211,9 +252,16 @@ export default function AgentDashboardPage() {
 
         const summaryRow = ((data || []) as TphSummaryRow[])[0]
 
+        const nextStatusCounts = parseSummaryTickets(summaryRow?.tickets)
+        const nextHourlyCounts = parseHourlyTickets(summaryRow?.hourly_tickets)
+
         setTickets([])
-        setStatusCounts(parseSummaryTickets(summaryRow?.tickets))
-        setHourlyCounts(parseHourlyTickets(summaryRow?.hourly_tickets))
+        setStatusCounts(nextStatusCounts)
+        setHourlyCounts(nextHourlyCounts)
+        trackRefreshResult(
+          getTicketDataSnapshot([], nextStatusCounts, nextHourlyCounts),
+          showFullLoader
+        )
         return
       }
 
@@ -242,17 +290,36 @@ export default function AgentDashboardPage() {
       setTickets(rawTickets)
       setStatusCounts(nextStatusCounts)
       setHourlyCounts(nextHourlyCounts)
+      trackRefreshResult(
+        getTicketDataSnapshot(rawTickets, nextStatusCounts, nextHourlyCounts),
+        showFullLoader
+      )
     } catch (err: any) {
       setError(err.message || 'Failed to load tickets')
     } finally {
       setIsLoading(false)
       setIsRefreshing(false)
     }
-  }, [currentShiftDate, selectedShiftDate, user?.email, user?.name])
+  }, [currentShiftDate, selectedShiftDate, trackRefreshResult, user?.email, user?.name])
 
   useEffect(() => {
     loadTickets(true)
   }, [loadTickets])
+
+  useEffect(() => {
+    if (!showNoNewTicketsModal) return
+
+    closeModalButtonRef.current?.focus()
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowNoNewTicketsModal(false)
+      }
+    }
+
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [showNoNewTicketsModal])
 
   const ticketsByStatus = (status: string) => 
     tickets.filter(t => t.status === status)
@@ -525,6 +592,70 @@ export default function AgentDashboardPage() {
             })}
           </div>
         </>
+      )}
+
+      {showNoNewTicketsModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setShowNoNewTicketsModal(false)
+            }
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="no-new-tickets-title"
+            aria-describedby="no-new-tickets-description"
+            className="w-full max-w-lg rounded-xl border border-outline-variant bg-surface p-6 shadow-2xl"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+                  <AlertTriangle size={22} aria-hidden="true" />
+                </div>
+                <div>
+                  <h2 id="no-new-tickets-title" className="font-hanken text-title-lg font-bold text-on-surface">
+                    Don&apos;t see any new tickets being added? 🤔
+                  </h2>
+                  <p id="no-new-tickets-description" className="mt-2 text-sm text-on-surface-variant">
+                    Try the following:
+                  </p>
+                </div>
+              </div>
+              <button
+                ref={closeModalButtonRef}
+                type="button"
+                onClick={() => setShowNoNewTicketsModal(false)}
+                className="rounded-full p-2 text-on-surface-variant transition hover:bg-surface-container hover:text-on-surface focus:outline-none focus:ring-2 focus:ring-primary-container"
+                aria-label="Close ticket refresh guidance"
+              >
+                <X size={20} aria-hidden="true" />
+              </button>
+            </div>
+
+            <ul className="mt-5 space-y-3 pl-5 text-sm leading-6 text-on-surface">
+              <li className="list-disc">Resubmit the ticket, then refresh this page again.</li>
+              <li className="list-disc">Make sure the SBD CLAD extension is enabled in your browser.</li>
+              <li className="list-disc">
+                Refresh Zendesk, then refresh this whole page. Proceed with caution and make sure you are not
+                handling any tickets, as refreshing may cause you to lose unsaved notes.
+              </li>
+            </ul>
+
+            <div className="mt-6 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowNoNewTicketsModal(false)}
+                className="min-h-11 rounded-lg bg-primary-container px-5 py-2 text-sm font-bold text-on-primary-container shadow-sm transition hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-primary-container focus:ring-offset-2"
+              >
+                Got it
+              </button>
+            </div>
+          </section>
+        </div>
       )}
     </div>
   )

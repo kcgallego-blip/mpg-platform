@@ -97,8 +97,8 @@ export interface Database {
       agents: {
         Row: {
           name: string
+          email: string | null
           team_leader: string | null
-          setting: string | null
           role: string | null
           off_1: string | null
           off_2: string | null
@@ -108,8 +108,8 @@ export interface Database {
         }
         Insert: {
           name: string
+          email?: string | null
           team_leader?: string | null
-          setting?: string | null
           role?: string | null
           off_1?: string | null
           off_2?: string | null
@@ -119,8 +119,8 @@ export interface Database {
         }
         Update: {
           name?: string
+          email?: string | null
           team_leader?: string | null
-          setting?: string | null
           role?: string | null
           off_1?: string | null
           off_2?: string | null
@@ -400,6 +400,16 @@ export interface Database {
           open_comment?: string | null
           updated_at?: string
         }
+      }
+    }
+    Functions: {
+      reconcile_agents: {
+        Args: {
+          p_updates?: Json
+          p_new_agents?: Json
+          p_delete_names?: string[]
+        }
+        Returns: Json
       }
     }
   }

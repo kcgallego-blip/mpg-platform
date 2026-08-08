@@ -145,17 +145,14 @@ export async function getUniqueTeamLeaders() {
   return uniqueLeaders
 }
 
-export async function getAllAgentsWithSettings() {
+export async function getAllAgentNames() {
   const { data, error } = await supabase
     .from('agents')
-    .select('name, setting')
+    .select('name')
     .order('name', { ascending: true })
 
   if (error) throw error
-  return data.map(agent => ({
-    name: agent.name,
-    setting: agent.setting ?? null,
-  }))
+  return data.map(agent => ({ name: agent.name }))
 }
 
 export async function getAgentsByTeamLeader(teamLeader: string) {

@@ -1,10 +1,17 @@
 import { create } from 'zustand'
 
-type FeatureSettingsResponse = {
+type AttendanceRouteSettingsResponse = {
   attendanceRouteEnabled: boolean
   canAccessAttendance: boolean
   isAdmin: boolean
 }
+
+type ProductivityReportSettingsResponse = {
+  productivityReportEnabled: boolean
+}
+
+type FeatureSettingsResponse = AttendanceRouteSettingsResponse &
+  ProductivityReportSettingsResponse
 
 type FeatureSettingsStore = FeatureSettingsResponse & {
   loadedFor: string | null
@@ -13,24 +20,26 @@ type FeatureSettingsStore = FeatureSettingsResponse & {
   error: string | null
   load: (email: string, force?: boolean) => Promise<void>
   updateAttendanceRoute: (email: string, enabled: boolean) => Promise<void>
+  updateProductivityReport: (email: string, enabled: boolean) => Promise<void>
 }
 
 let pendingLoad: Promise<void> | null = null
 let pendingEmail: string | null = null
 
-async function readResponse(response: Response): Promise<FeatureSettingsResponse> {
+async function readResponse<T>(response: Response): Promise<T> {
   const payload = await response.json()
 
   if (!response.ok) {
     throw new Error(payload.error || 'Unable to load feature settings')
   }
 
-  return payload as FeatureSettingsResponse
+  return payload as T
 }
 
 export const useFeatureSettingsStore = create<FeatureSettingsStore>((set, get) => ({
   attendanceRouteEnabled: false,
   canAccessAttendance: false,
+  productivityReportEnabled: false,
   isAdmin: false,
   loadedFor: null,
   loading: false,
@@ -56,6 +65,7 @@ export const useFeatureSettingsStore = create<FeatureSettingsStore>((set, get) =
         : {
             attendanceRouteEnabled: false,
             canAccessAttendance: false,
+            productivityReportEnabled: false,
             isAdmin: false,
             loadedFor: null,
           }),
@@ -64,13 +74,18 @@ export const useFeatureSettingsStore = create<FeatureSettingsStore>((set, get) =
     pendingEmail = email
     pendingLoad = (async () => {
       try {
-        const response = await fetch('/api/settings/attendance-route', {
-          cache: 'no-store',
-        })
-        const settings = await readResponse(response)
+        const [attendanceResponse, productivityReportResponse] = await Promise.all([
+          fetch('/api/settings/attendance-route', { cache: 'no-store' }),
+          fetch('/api/settings/productivity-report', { cache: 'no-store' }),
+        ])
+        const [attendanceSettings, productivityReportSettings] = await Promise.all([
+          readResponse<AttendanceRouteSettingsResponse>(attendanceResponse),
+          readResponse<ProductivityReportSettingsResponse>(productivityReportResponse),
+        ])
 
         set({
-          ...settings,
+          ...attendanceSettings,
+          ...productivityReportSettings,
           loadedFor: email,
           loading: false,
           error: null,
@@ -100,7 +115,32 @@ export const useFeatureSettingsStore = create<FeatureSettingsStore>((set, get) =
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled }),
       })
-      const settings = await readResponse(response)
+      const settings = await readResponse<AttendanceRouteSettingsResponse>(response)
+
+      set({
+        ...settings,
+        loadedFor: email,
+        saving: false,
+        error: null,
+      })
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Unable to update feature settings'
+      set({ saving: false, error: message })
+      throw error
+    }
+  },
+
+  updateProductivityReport: async (email, enabled) => {
+    set({ saving: true, error: null })
+
+    try {
+      const response = await fetch('/api/settings/productivity-report', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      })
+      const settings = await readResponse<ProductivityReportSettingsResponse>(response)
 
       set({
         ...settings,

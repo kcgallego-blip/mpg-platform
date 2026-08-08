@@ -4,14 +4,12 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { Send, Loader2, Users, X } from 'lucide-react'
 import { showITTicketSuccessToast } from '@/components/ITTicketSuccessToast'
-import { createTicket, getAllAgentsWithSettings } from '@/lib/db'
+import { createTicket, getAllAgentNames } from '@/lib/db'
 import { createSubmissionHistory, type TicketHistoryEntry } from '@/lib/ticketAudit'
 import { useAuthStore } from '@/lib/authStore'
 
-type AgentWorkSetting = string | null | undefined
 type AgentOption = {
   name: string
-  setting: AgentWorkSetting
 }
 
 type SubmissionMode = 'single' | 'batch'
@@ -104,16 +102,6 @@ function buildTicketData(
     history: createSubmissionHistory(submittedBy, now.toISOString()),
     notes: [],
   }
-}
-
-function getAgentSettingLabel(setting: AgentWorkSetting) {
-  return setting === 'O' ? 'Onsite' : 'WFH'
-}
-
-function getAgentSettingClass(setting: AgentWorkSetting) {
-  return setting === 'O'
-    ? 'bg-primary-container/20 text-primary border-primary/30'
-    : 'bg-surface-container-high text-on-surface-variant border-outline-variant/40'
 }
 
 function isValidTime(value: string) {
@@ -331,13 +319,6 @@ function AgentSelector({
                       className="w-full flex items-center gap-2 text-left px-3 py-2 rounded-lg hover:bg-surface-container-high transition-colors text-on-surface"
                     >
                       <span>{agent.name}</span>
-                      <span
-                        className={`ml-auto rounded-full border px-2 py-0.5 text-xs ${getAgentSettingClass(
-                          agent.setting
-                        )}`}
-                      >
-                        {getAgentSettingLabel(agent.setting)}
-                      </span>
                     </button>
                   ))
                 ) : (
@@ -440,7 +421,7 @@ export default function ITReportPage() {
     async function fetchAgents() {
       try {
         setLoadingAgents(true)
-        const agents = await getAllAgentsWithSettings()
+        const agents = await getAllAgentNames()
         setAllAgents(agents)
       } catch (error) {
         console.error('Error fetching agents:', error)
@@ -517,7 +498,7 @@ export default function ITReportPage() {
       showITTicketSuccessToast(
         `${createdTickets.length} ${reportLabel} submitted successfully.`
       )
-      router.push('/dashboard/it/ticket-reports')
+      router.push('/it/ticket-reports')
     } catch (error: any) {
       console.error('Error creating ticket:', error)
       console.error('Error details:', JSON.stringify(error, null, 2))
@@ -557,7 +538,7 @@ export default function ITReportPage() {
         <div className="flex gap-4">
           <button
             type="button"
-            onClick={() => router.push('/dashboard')}
+            onClick={() => router.push('/staffing')}
             className="flex-1 px-lg py-md rounded-lg glass-effect text-on-surface font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             disabled={loading}
           >

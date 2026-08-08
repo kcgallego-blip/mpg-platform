@@ -1,4 +1,5 @@
 export const ATTENDANCE_ROUTE_SETTING_KEY = 'attendance_route_enabled'
+export const PRODUCTIVITY_REPORT_SETTING_KEY = 'productivity_report_enabled'
 
 export function canRoleAccessAttendance(
   role: string | null | undefined,

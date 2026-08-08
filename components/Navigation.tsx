@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/lib/authStore'
 import { useFeatureSettingsStore } from '@/lib/featureSettingsStore'
+import { getPostLoginRoute } from '@/lib/routes'
 import { LogOut, User, LayoutDashboard, Ticket, FileText, ChevronDown, ChevronRight, Users, BarChart3, TrendingUp, Wrench, MessageSquareText, CalendarClock, SlidersHorizontal } from 'lucide-react'
 import { useState, useEffect, useRef, type ComponentType } from 'react'
 import Image from 'next/image'
@@ -11,50 +12,50 @@ type NavChild = { href: string; icon: IconComponent; label: string }
 type NavItem = { href: string; icon: IconComponent; label: string } | { label: string; icon: IconComponent; children: NavChild[] }
 
 const allNavItems: NavItem[] = [
-  { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+  { href: '/staffing', icon: LayoutDashboard, label: 'Staffing' },
   { href: '/suggestions', icon: MessageSquareText, label: 'Suggestions' },
-  { href: '/dashboard/stats', icon: TrendingUp, label: 'Stats' },
+  { href: '/stats', icon: TrendingUp, label: 'Stats' },
   { href: '/survey', icon: MessageSquareText, label: 'Survey' },
-  { href: '/dashboard/productivity', icon: BarChart3, label: 'Productivity' },
+  { href: '/productivity', icon: BarChart3, label: 'Productivity' },
   {
     label: 'IT',
     icon: Ticket,
     children: [
-      { href: '/dashboard/it/submit-ticket', icon: FileText, label: 'Submit Ticket' },
-      { href: '/dashboard/it/ticket-reports', icon: Ticket, label: 'Ticket Reports' },
+      { href: '/it/submit-ticket', icon: FileText, label: 'Submit Ticket' },
+      { href: '/it/ticket-reports', icon: Ticket, label: 'Ticket Reports' },
     ],
   },
   {
     label: 'Utilities',
     icon: Wrench,
     children: [
-      { href: '/dashboard/utilities/ledger', icon: FileText, label: 'Ledger' },
-      { href: '/dashboard/utilities/accounts', icon: Users, label: 'Accounts' },
-      { href: '/dashboard/utilities/agents', icon: Users, label: 'Agents' },
+      { href: '/utilities/ledger', icon: FileText, label: 'Ledger' },
+      { href: '/utilities/accounts', icon: Users, label: 'Accounts' },
+      { href: '/utilities/agents', icon: Users, label: 'Agents' },
       { href: '/utilities/controls', icon: SlidersHorizontal, label: 'Controls' },
     ],
   },
 ]
 
 const managerNavItems: NavItem[] = [
-  { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-  { href: '/dashboard/stats', icon: TrendingUp, label: 'Stats' },
+  { href: '/staffing', icon: LayoutDashboard, label: 'Staffing' },
+  { href: '/stats', icon: TrendingUp, label: 'Stats' },
   { href: '/survey', icon: MessageSquareText, label: 'Survey' },
-  { href: '/dashboard/productivity', icon: BarChart3, label: 'Productivity' },
+  { href: '/productivity', icon: BarChart3, label: 'Productivity' },
   {
     label: 'IT',
     icon: Ticket,
     children: [
-      { href: '/dashboard/it/submit-ticket', icon: FileText, label: 'Submit Ticket' },
-      { href: '/dashboard/it/ticket-reports', icon: Ticket, label: 'Ticket Reports' },
+      { href: '/it/submit-ticket', icon: FileText, label: 'Submit Ticket' },
+      { href: '/it/ticket-reports', icon: Ticket, label: 'Ticket Reports' },
     ],
   },
 ]
 
 const agentNavItems: NavItem[] = [
-  { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+  { href: '/agent', icon: LayoutDashboard, label: 'Agent' },
   { href: '/suggestions', icon: MessageSquareText, label: 'Suggestions' },
-  { href: '/dashboard/stats', icon: TrendingUp, label: 'Stats' },
+  { href: '/stats', icon: TrendingUp, label: 'Stats' },
   { href: '/survey', icon: MessageSquareText, label: 'Survey' },
 ]
 
@@ -74,7 +75,7 @@ function getNavItemsByRole(
   showAttendance: boolean
 ): NavItem[] {
   if (!role) {
-    return [{ href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' }]
+    return [{ href: '/staffing', icon: LayoutDashboard, label: 'Staffing' }]
   }
 
   if (role === 'Admin') return withAttendance(allNavItems, true)
@@ -102,6 +103,7 @@ export default function Navigation() {
     user?.role === 'Admin' ||
     (settingsLoadedFor === user?.email && canAccessAttendance)
   const navItems = getNavItemsByRole(user?.role, showAttendance)
+  const homeHref = getPostLoginRoute(user?.role)
 
   const handleLogout = async () => {
     setShowLogout(false)
@@ -144,7 +146,7 @@ export default function Navigation() {
       <header className="sticky top-0 z-50 bg-primary-container/90 backdrop-blur-glass-md border-b border-outline/20">
         <div className="max-w-container mx-auto px-gutter py-4">
           <div className="flex items-center justify-between">
-            <Link href="/dashboard" className="flex items-center gap-3">
+            <Link href={homeHref} className="flex items-center gap-3">
               <Image
                 src="/icon.png"
                 alt="CLAD Logo"

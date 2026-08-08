@@ -4,6 +4,7 @@ import { useEffect, useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { useAuthStore } from '@/lib/authStore'
+import { getPostLoginRoute } from '@/lib/routes'
 import { LogIn, Lock, Mail, UserPlus, Eye, EyeOff, CheckCircle, X } from 'lucide-react'
 import Image from 'next/image'
 
@@ -43,7 +44,7 @@ function LoginPageContent() {
 
   useEffect(() => {
     if (initialized && user) {
-      router.replace('/dashboard')
+      router.replace(getPostLoginRoute(user.role))
     }
   }, [user, initialized, router])
 
@@ -54,7 +55,6 @@ function LoginPageContent() {
 
     try {
       await loginWithEmail(email.trim(), password)
-      router.push('/dashboard')
     } catch (err: any) {
       if (err.message?.includes('pending approval')) {
         setToastMessage('Account is currently in pending approval. Please reach out to IT Kevin for further assistance.')
