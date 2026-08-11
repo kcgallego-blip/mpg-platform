@@ -1,92 +1,42 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthenticatedDbUser } from '@/lib/sessionAuth'
-import { supabase } from '@/lib/supabase'
+import { supabaseAdmin } from '@/lib/supabaseAdmin'
 
-const FUZZY_NAME_MATCH_THRESHOLD = 60
 const MIN_SURVEY_WEEK = 27
 const MIN_SURVEY_MONTH = 7
-const SURVEY_FETCH_BATCH_SIZE = 1000
-const SURVEY_FETCH_MAX_ROWS = 50000
+const MAX_PAGE_SIZE = 50
+const SURVEY_COLUMNS = 'survey_date, response_id, agent, csat, mod_comment, open_comment, created_at'
+const noStoreHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
 
-const normalizeNameForMatch = (value: string | null | undefined) =>
-  (value || '')
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim()
+type PeriodType = 'weekly' | 'monthly'
+type PeriodOption = { value: string; label: string; sortTime: number }
 
-const getNameTokens = (value: string | null | undefined) =>
-  Array.from(new Set(normalizeNameForMatch(value).split(/\s+/).filter(Boolean)))
+const parsePeriodType = (value: string | null): PeriodType => value === 'monthly' ? 'monthly' : 'weekly'
 
-const getFuzzyNameScore = (surveyAgent: string | null | undefined, userName: string | null | undefined) => {
-  const normalizedSurveyAgent = normalizeNameForMatch(surveyAgent)
-  const normalizedUserName = normalizeNameForMatch(userName)
-  const userTokens = getNameTokens(userName)
-  const surveyTokens = getNameTokens(surveyAgent)
-
-  if (!normalizedSurveyAgent || !normalizedUserName || userTokens.length === 0 || surveyTokens.length === 0) {
-    return 0
-  }
-
-  if (normalizedSurveyAgent === normalizedUserName) return 100
-  if (normalizedSurveyAgent.includes(normalizedUserName) || normalizedUserName.includes(normalizedSurveyAgent)) return 90
-
-  const surveyTokenSet = new Set(surveyTokens)
-  const userTokenSet = new Set(userTokens)
-  const matchedUserTokens = userTokens.filter(token => surveyTokenSet.has(token)).length
-  const matchedSurveyTokens = surveyTokens.filter(token => userTokenSet.has(token)).length
-  const firstToken = userTokens[0]
-  const lastToken = userTokens[userTokens.length - 1]
-
-  if (
-    (firstToken && lastToken && surveyTokenSet.has(firstToken) && surveyTokenSet.has(lastToken)) ||
-    matchedUserTokens === userTokens.length ||
-    matchedSurveyTokens === surveyTokens.length
-  ) {
-    return 85
-  }
-
-  if (
-    matchedUserTokens >= 2 &&
-    ((firstToken && surveyTokenSet.has(firstToken)) || (lastToken && surveyTokenSet.has(lastToken)))
-  ) {
-    return 70
-  }
-
-  if (matchedUserTokens >= Math.ceil(userTokens.length * 0.6)) return 60
-
-  return 0
-}
-
-const parsePeriodType = (value: string | null) => {
-  return value === 'monthly' ? 'monthly' : 'weekly'
+const parsePositiveInteger = (value: string | null, fallback: number) => {
+  const parsed = Number(value)
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback
 }
 
 const getDate = (value: string | null | undefined) => {
   if (!value) return null
   const datePart = value.match(/^\d{4}-\d{2}-\d{2}/)?.[0]
-  const date = datePart
-    ? new Date(`${datePart}T00:00:00`)
-    : new Date(value)
+  const date = datePart ? new Date(`${datePart}T00:00:00`) : new Date(value)
   return Number.isNaN(date.getTime()) ? null : date
 }
 
-const getSurveyCalendarDate = (date: Date) => {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate())
-}
+const getCalendarDate = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate())
 
-const getSurveyWeekStartDate = (date: Date) => {
-  const weekStart = getSurveyCalendarDate(date)
+const getWeekStartDate = (date: Date) => {
+  const weekStart = getCalendarDate(date)
   weekStart.setDate(weekStart.getDate() - weekStart.getDay())
   return weekStart
 }
 
-const getSurveyWeekInfo = (date: Date) => {
-  const calendarDate = getSurveyCalendarDate(date)
-  const weekStart = getSurveyWeekStartDate(calendarDate)
-  const yearStart = new Date(calendarDate.getFullYear(), 0, 1)
-  const yearWeekStart = getSurveyWeekStartDate(yearStart)
+const getWeekInfo = (date: Date) => {
+  const calendarDate = getCalendarDate(date)
+  const weekStart = getWeekStartDate(calendarDate)
+  const yearWeekStart = getWeekStartDate(new Date(calendarDate.getFullYear(), 0, 1))
   const daysSinceYearStart = (weekStart.getTime() - yearWeekStart.getTime()) / (7 * 24 * 60 * 60 * 1000)
 
   return {
@@ -97,164 +47,219 @@ const getSurveyWeekInfo = (date: Date) => {
 }
 
 const getWeekKey = (date: Date) => {
-  const { year, week } = getSurveyWeekInfo(date)
+  const { year, week } = getWeekInfo(date)
   return `${year}-W${String(week).padStart(2, '0')}`
 }
 
-const getMonthKey = (date: Date) => {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
-}
+const getMonthKey = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
 
 const getWeekLabel = (date: Date) => {
-  const { week, weekStart } = getSurveyWeekInfo(date)
+  const { week, weekStart } = getWeekInfo(date)
   const weekEnd = new Date(weekStart)
   weekEnd.setDate(weekEnd.getDate() + 6)
-  const monthDayFormatter = new Intl.DateTimeFormat('en-US', {
-    month: 'short',
-    day: 'numeric',
-  })
-  const fullDateFormatter = new Intl.DateTimeFormat('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  })
-  const rangeLabel = weekStart.getFullYear() === weekEnd.getFullYear() && weekStart.getMonth() === weekEnd.getMonth()
-    ? `${monthDayFormatter.format(weekStart)} - ${fullDateFormatter.format(weekEnd)}`
-    : `${fullDateFormatter.format(weekStart)} - ${fullDateFormatter.format(weekEnd)}`
+  const shortFormatter = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' })
+  const fullFormatter = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  const sameMonth = weekStart.getFullYear() === weekEnd.getFullYear() && weekStart.getMonth() === weekEnd.getMonth()
+  const rangeLabel = sameMonth
+    ? `${shortFormatter.format(weekStart)} - ${fullFormatter.format(weekEnd)}`
+    : `${fullFormatter.format(weekStart)} - ${fullFormatter.format(weekEnd)}`
 
   return `Week ${week} - ${rangeLabel}`
 }
 
-const getMonthLabel = (date: Date) => {
-  return new Intl.DateTimeFormat('en-US', {
-    month: 'long',
-    year: 'numeric',
-  }).format(date)
-}
+const getMonthLabel = (date: Date) =>
+  new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(date)
 
-const getPeriodOptions = (rows: any[], periodType: 'weekly' | 'monthly') => {
-  const optionMap = new Map<string, { value: string; label: string; sortTime: number }>()
+const getPeriodOptions = (rows: Array<{ survey_date: string | null }>, periodType: PeriodType) => {
+  const optionMap = new Map<string, PeriodOption>()
 
-  for (const row of rows) {
+  rows.forEach((row) => {
     const date = getDate(row.survey_date)
-    if (!date) continue
+    if (!date) return
 
     if (periodType === 'weekly') {
-      const { week, weekStart } = getSurveyWeekInfo(date)
-      if (week < MIN_SURVEY_WEEK) continue
-
+      const { week, weekStart } = getWeekInfo(date)
+      if (week < MIN_SURVEY_WEEK) return
       const value = getWeekKey(date)
       if (!optionMap.has(value)) {
-        optionMap.set(value, {
-          value,
-          label: getWeekLabel(date),
-          sortTime: weekStart.getTime(),
-        })
+        optionMap.set(value, { value, label: getWeekLabel(date), sortTime: weekStart.getTime() })
       }
-    } else {
-      const month = date.getMonth() + 1
-      if (month < MIN_SURVEY_MONTH) continue
+      return
+    }
 
-      const value = getMonthKey(date)
-      if (!optionMap.has(value)) {
-        optionMap.set(value, {
-          value,
-          label: getMonthLabel(date),
-          sortTime: new Date(date.getFullYear(), date.getMonth(), 1).getTime(),
-        })
-      }
+    const month = date.getMonth() + 1
+    if (month < MIN_SURVEY_MONTH) return
+    const value = getMonthKey(date)
+    if (!optionMap.has(value)) {
+      optionMap.set(value, {
+        value,
+        label: getMonthLabel(date),
+        sortTime: new Date(date.getFullYear(), date.getMonth(), 1).getTime(),
+      })
+    }
+  })
+
+  return Array.from(optionMap.values()).sort((first, second) => second.sortTime - first.sortTime)
+}
+
+const toDateKey = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+
+const getPeriodRange = (periodType: PeriodType, value: string) => {
+  if (periodType === 'monthly') {
+    const match = value.match(/^(\d{4})-(\d{2})$/)
+    if (!match) return null
+    const year = Number(match[1])
+    const monthIndex = Number(match[2]) - 1
+    const from = new Date(year, monthIndex, 1)
+    const to = new Date(year, monthIndex + 1, 0)
+    if (Number.isNaN(from.getTime()) || monthIndex < 0 || monthIndex > 11) return null
+    return { from: toDateKey(from), to: toDateKey(to) }
+  }
+
+  const match = value.match(/^(\d{4})-W(\d{2})$/)
+  if (!match) return null
+  const year = Number(match[1])
+  const week = Number(match[2])
+  if (week < 1 || week > 54) return null
+  const from = getWeekStartDate(new Date(year, 0, 1))
+  from.setDate(from.getDate() + (week - 1) * 7)
+  const to = new Date(from)
+  to.setDate(to.getDate() + 6)
+  return { from: toDateKey(from), to: toDateKey(to) }
+}
+
+async function getSurveyPeriodDates(agentName: string | null) {
+  const { data, error } = await supabaseAdmin.rpc('get_survey_period_dates', {
+    p_agent_name: agentName,
+  })
+
+  if (!error) return (data || []) as Array<{ survey_date: string | null }>
+
+  console.warn('Survey period RPC unavailable; using bounded date fallback:', error.message)
+  let fallbackQuery = supabaseAdmin
+    .from('survey')
+    .select('survey_date')
+    .not('survey_date', 'is', null)
+    .order('survey_date', { ascending: false })
+    .limit(366)
+
+  if (agentName) fallbackQuery = fallbackQuery.ilike('agent', agentName)
+  const fallback = await fallbackQuery
+  if (fallback.error) throw fallback.error
+  return (fallback.data || []) as Array<{ survey_date: string | null }>
+}
+
+async function getSurveyPage(params: {
+  agentName: string | null
+  from: string
+  to: string
+  search: string
+  offset: number
+  pageSize: number
+}) {
+  const rpcResult = await supabaseAdmin.rpc('get_survey_page', {
+    p_from: params.from,
+    p_to: params.to,
+    p_agent_name: params.agentName,
+    p_search: params.search || null,
+    p_offset: params.offset,
+    p_limit: params.pageSize,
+  })
+
+  if (!rpcResult.error) {
+    const rows = (rpcResult.data || []) as Array<Record<string, unknown> & { total_count?: number }>
+    const total = Number(rows[0]?.total_count || 0)
+    return {
+      rows: rows.map(({ total_count: _totalCount, ...row }) => row),
+      total,
     }
   }
 
-  return Array.from(optionMap.values()).sort((a, b) => b.sortTime - a.sortTime)
-}
+  console.warn('Survey page RPC unavailable; using PostgREST filters:', rpcResult.error.message)
+  let query = supabaseAdmin
+    .from('survey')
+    .select(SURVEY_COLUMNS, { count: 'exact' })
+    .gte('survey_date', params.from)
+    .lte('survey_date', params.to)
+    .order('survey_date', { ascending: false, nullsFirst: false })
+    .order('created_at', { ascending: false })
+    .range(params.offset, params.offset + params.pageSize - 1)
 
-const isInPeriod = (surveyDate: string | null | undefined, periodType: 'weekly' | 'monthly', periodValue: string | null) => {
-  const date = getDate(surveyDate)
-  if (!date || !periodValue) return false
-
-  return periodType === 'weekly'
-    ? getWeekKey(date) === periodValue
-    : getMonthKey(date) === periodValue
-}
-
-const fetchSurveyRows = async () => {
-  const rows: any[] = []
-
-  for (let from = 0; from < SURVEY_FETCH_MAX_ROWS; from += SURVEY_FETCH_BATCH_SIZE) {
-    const to = Math.min(from + SURVEY_FETCH_BATCH_SIZE - 1, SURVEY_FETCH_MAX_ROWS - 1)
-    const { data, error } = await supabase
-      .from('survey')
-      .select('*')
-      .order('survey_date', { ascending: false, nullsFirst: false })
-      .order('created_at', { ascending: false })
-      .range(from, to)
-
-    if (error) {
-      return { rows, error }
-    }
-
-    rows.push(...(data || []))
-
-    if (!data || data.length < SURVEY_FETCH_BATCH_SIZE) {
-      break
-    }
+  if (params.agentName) query = query.ilike('agent', params.agentName)
+  if (params.search) {
+    const search = params.search.replace(/[(),]/g, ' ').trim()
+    query = query.or(`response_id.ilike.%${search}%,agent.ilike.%${search}%,csat.ilike.%${search}%,mod_comment.ilike.%${search}%,open_comment.ilike.%${search}%`)
   }
 
-  return { rows, error: null }
+  const result = await query
+  if (result.error) throw result.error
+  return { rows: result.data || [], total: result.count || 0 }
 }
 
 export async function GET(request: NextRequest) {
   try {
     const dbUser = await getAuthenticatedDbUser(request)
-
     if (!dbUser) {
-      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401, headers: noStoreHeaders })
     }
 
     const userRole = dbUser.role || 'Agent'
     const userName = dbUser.name || ''
     const isAgent = userRole.toLowerCase() === 'agent'
+    const agentName = isAgent && userName ? userName : null
     const periodType = parsePeriodType(request.nextUrl.searchParams.get('periodType'))
     const requestedPeriod = request.nextUrl.searchParams.get('period')
+    const page = parsePositiveInteger(request.nextUrl.searchParams.get('page'), 1)
+    const pageSize = Math.min(parsePositiveInteger(request.nextUrl.searchParams.get('pageSize'), MAX_PAGE_SIZE), MAX_PAGE_SIZE)
+    const search = (request.nextUrl.searchParams.get('search') || '').trim().slice(0, 200)
 
-    const { rows: surveyRows, error } = await fetchSurveyRows()
+    const periodDates = await getSurveyPeriodDates(agentName)
+    const weeklyOptions = getPeriodOptions(periodDates, 'weekly')
+    const monthlyOptions = getPeriodOptions(periodDates, 'monthly')
+    const activeOptions = periodType === 'monthly' ? monthlyOptions : weeklyOptions
+    const periodValue = activeOptions.some((option) => option.value === requestedPeriod)
+      ? requestedPeriod as string
+      : activeOptions[0]?.value || ''
+    const periodRange = periodValue ? getPeriodRange(periodType, periodValue) : null
 
-    if (error) {
-      console.error('Survey fetch error:', error)
-      return NextResponse.json({ error: 'Failed to fetch survey data' }, { status: 500 })
+    if (!periodRange) {
+      return NextResponse.json({
+        survey: [],
+        total: 0,
+        page: 1,
+        pageSize,
+        userRole,
+        userName,
+        periodType,
+        periodValue,
+        periodOptions: { weekly: weeklyOptions, monthly: monthlyOptions },
+      }, { headers: noStoreHeaders })
     }
 
-    const scopedRows = isAgent
-      ? (surveyRows || []).filter(row => getFuzzyNameScore(row.agent, userName) >= FUZZY_NAME_MATCH_THRESHOLD)
-      : surveyRows || []
-    const optionRows = surveyRows || []
-    const weeklyOptions = isAgent ? getPeriodOptions(optionRows, 'weekly') : []
-    const monthlyOptions = isAgent ? getPeriodOptions(optionRows, 'monthly') : []
-    const periodOptions = periodType === 'monthly' ? monthlyOptions : weeklyOptions
-    const selectedPeriod = periodOptions.some(option => option.value === requestedPeriod)
-      ? requestedPeriod
-      : periodOptions[0]?.value || null
-    const rows = isAgent
-      ? scopedRows.filter(row => isInPeriod(row.survey_date, periodType, selectedPeriod))
-      : scopedRows
+    const result = await getSurveyPage({
+      agentName,
+      from: periodRange.from,
+      to: periodRange.to,
+      search,
+      offset: (page - 1) * pageSize,
+      pageSize,
+    })
 
     return NextResponse.json({
-      survey: rows,
+      survey: result.rows,
+      total: result.total,
+      page,
+      pageSize,
       userRole,
       userName,
-      totalFetchedRows: surveyRows.length,
-      maxFetchedRows: SURVEY_FETCH_MAX_ROWS,
-      isFetchTruncated: surveyRows.length >= SURVEY_FETCH_MAX_ROWS,
       periodType,
-      periodValue: selectedPeriod,
-      periodOptions: {
-        weekly: weeklyOptions,
-        monthly: monthlyOptions,
-      },
-    })
+      periodValue,
+      periodOptions: { weekly: weeklyOptions, monthly: monthlyOptions },
+    }, { headers: noStoreHeaders })
   } catch (error) {
     console.error('Survey API error:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500, headers: noStoreHeaders })
   }
 }

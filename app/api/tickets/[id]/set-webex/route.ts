@@ -31,7 +31,7 @@ export async function PATCH(
       .from('tickets')
       .update({ webex_message_id: webexMessageId })
       .eq('ticketid', parseInt(ticketId))
-      .select()
+      .select('ticketid, webex_message_id')
       .single()
 
     if (error) {

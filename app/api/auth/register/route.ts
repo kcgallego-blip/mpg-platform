@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
 
     const { data: existingUser, error: existingUserError } = await supabase
       .from('users')
-      .select('*')
+      .select('email')
       .eq('email', normalizedEmail)
       .maybeSingle()
 

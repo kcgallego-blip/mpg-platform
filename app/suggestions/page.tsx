@@ -176,7 +176,7 @@ export default function SuggestionsPage() {
         </h1>
         <p className="mt-2 max-w-2xl text-on-surface-variant">
           {role === 'Agent'
-            ? 'Tell the team what could make our tools, processes, or workplace better.'
+            ? 'Tell the team what could make our this web portal better.'
             : 'Review ideas submitted by agents, with the newest entries shown first.'}
         </p>
       </div>

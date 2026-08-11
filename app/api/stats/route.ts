@@ -1,9 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { STATS_COLUMNS, STATS_MONTH_COLUMNS } from '@/lib/dbColumns'
 import { getAuthenticatedDbUser } from '@/lib/sessionAuth'
-import { supabase } from '@/lib/supabase'
+import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { getStatsWeekNumber, getStatsWeekRange } from '@/lib/statsUtils'
+import type { Database } from '@/types/database'
 
 const FUZZY_NAME_MATCH_THRESHOLD = 60
+const MAX_PAGE_SIZE = 50
+type StatsRow = Database['public']['Tables']['stats']['Row']
+
+const parsePositiveInteger = (value: string | null, fallback: number) => {
+  const parsed = Number(value)
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback
+}
 
 const parseWeek = (value: string | null) => {
   if (value === null) return null
@@ -72,6 +81,63 @@ const getFuzzyNameScore = (statsName: string | null | undefined, userName: strin
   return 0
 }
 
+const resolveStatsAgentName = async ({
+  isMonthly,
+  periodValue,
+  userName,
+}: {
+  isMonthly: boolean
+  periodValue: number
+  userName: string
+}) => {
+  const userTokens = getNameTokens(userName)
+  const suffixes = new Set(['jr', 'sr', 'ii', 'iii', 'iv'])
+  const commaIndex = userName.indexOf(',')
+  const surnameTokens = commaIndex >= 0 ? getNameTokens(userName.slice(0, commaIndex)) : []
+  const givenNameTokens = commaIndex >= 0 ? getNameTokens(userName.slice(commaIndex + 1)) : []
+  const lastNameToken = commaIndex >= 0
+    ? surnameTokens[surnameTokens.length - 1]
+    : [...userTokens].reverse().find((token) => !suffixes.has(token))
+  const firstNameToken = commaIndex >= 0 ? givenNameTokens[0] : userTokens[0]
+  const anchorTokens = Array.from(new Set([firstNameToken, lastNameToken].filter(Boolean))) as string[]
+  let candidateQuery = supabaseAdmin
+    .from(isMonthly ? 'stats_month' : 'stats')
+    .select('name')
+    .limit(50)
+
+  candidateQuery = isMonthly
+    ? candidateQuery.eq('month', String(periodValue))
+    : candidateQuery.eq('week', periodValue)
+  anchorTokens.forEach((token) => {
+    candidateQuery = candidateQuery.ilike('name', `%${token}%`)
+  })
+
+  const { data, error } = await candidateQuery
+  if (error) throw error
+
+  const candidates = Array.from(new Set(
+    ((data || []) as Array<{ name?: string | null }>)
+      .map((row) => row.name?.trim())
+      .filter((name): name is string => Boolean(name))
+  ))
+
+  let bestMatch: string | null = null
+  let bestScore = 0
+  let hasAmbiguousBestMatch = false
+  candidates.forEach((candidate) => {
+    const score = getFuzzyNameScore(candidate, userName)
+    if (score > bestScore) {
+      bestMatch = candidate
+      bestScore = score
+      hasAmbiguousBestMatch = false
+    } else if (score === bestScore && score >= FUZZY_NAME_MATCH_THRESHOLD && candidate !== bestMatch) {
+      hasAmbiguousBestMatch = true
+    }
+  })
+
+  return bestScore >= FUZZY_NAME_MATCH_THRESHOLD && !hasAmbiguousBestMatch ? bestMatch : null
+}
+
 export async function GET(request: NextRequest) {
   try {
     const dbUser = await getAuthenticatedDbUser(request)
@@ -82,6 +148,7 @@ export async function GET(request: NextRequest) {
 
     const userRole = dbUser.role || 'Agent'
     const userName = dbUser.name || ''
+    const isAgent = userRole.trim().toLowerCase() === 'agent'
 
     // Get query parameters for filtering and searching
     const searchParams = request.nextUrl.searchParams
@@ -107,6 +174,12 @@ export async function GET(request: NextRequest) {
     const selectedWeek = parsedWeek ?? getStatsWeekNumber()
     const selectedMonth = parsedMonth ?? new Date().getMonth() + 1
     const selectedPeriodValue = isMonthly ? selectedMonth : selectedWeek
+    const page = parsePositiveInteger(searchParams.get('page'), 1)
+    const pageSize = Math.min(parsePositiveInteger(searchParams.get('pageSize'), 50), MAX_PAGE_SIZE)
+    const offset = (page - 1) * pageSize
+    const resolvedAgentName = isAgent && userName
+      ? await resolveStatsAgentName({ isMonthly, periodValue: selectedPeriodValue, userName })
+      : null
 
     // Validate sort parameters
     const validSortFields = [
@@ -133,9 +206,9 @@ export async function GET(request: NextRequest) {
     const safeOrder = sortOrder.toLowerCase() === 'desc' ? false : true
 
     // Build the base query
-    let query = supabase
+    let query = supabaseAdmin
       .from(isMonthly ? 'stats_month' : 'stats')
-      .select('*')
+      .select(isMonthly ? STATS_MONTH_COLUMNS : STATS_COLUMNS, { count: 'exact' })
 
     if (isMonthly) {
       query = query.eq('month', String(selectedPeriodValue))
@@ -143,15 +216,68 @@ export async function GET(request: NextRequest) {
       query = query.eq('week', selectedWeek)
     }
 
-    query = query.order(safeSortBy, { ascending: safeOrder }).order('created_at', { ascending: false })
+    if (isAgent) {
+      query = query.eq('name', resolvedAgentName || '__mpg_no_agent_match__')
+    }
+    if (supervisorFilter && supervisorFilter !== 'all') {
+      query = query.eq('supervisor', supervisorFilter)
+    }
+    if (searchQuery) {
+      const search = searchQuery.replace(/[(),]/g, ' ').trim()
+      query = query.or(`name.ilike.%${search}%,supervisor.ilike.%${search}%`)
+    }
 
-    const periodQuery = supabase
+    let selectedRange = 1
+    if (!isMonthly) {
+      let rangeQuery = supabaseAdmin
+        .from('stats')
+        .select('range')
+        .eq('week', selectedWeek)
+        .order('range', { ascending: false })
+        .limit(1)
+
+      if (isAgent) {
+        rangeQuery = rangeQuery.eq('name', resolvedAgentName || '__mpg_no_agent_match__')
+      }
+      if (supervisorFilter && supervisorFilter !== 'all') {
+        rangeQuery = rangeQuery.eq('supervisor', supervisorFilter)
+      }
+      if (searchQuery) {
+        const search = searchQuery.replace(/[(),]/g, ' ').trim()
+        rangeQuery = rangeQuery.or(`name.ilike.%${search}%,supervisor.ilike.%${search}%`)
+      }
+
+      const { data: latestRangeRows, error: latestRangeError } = await rangeQuery
+      if (latestRangeError) throw latestRangeError
+      selectedRange = Number(latestRangeRows?.[0]?.range) || getStatsWeekRange()
+      query = query.eq('range', selectedRange)
+    }
+
+    query = query
+      .order(safeSortBy, { ascending: safeOrder })
+      .order('created_at', { ascending: false })
+      .range(offset, offset + pageSize - 1)
+
+    let supervisorQuery = supabaseAdmin
       .from(isMonthly ? 'stats_month' : 'stats')
-      .select(isMonthly ? 'month, name' : 'week, name')
-      .order(isMonthly ? 'month' : 'week', { ascending: false })
+      .select('supervisor')
+    supervisorQuery = isMonthly
+      ? supervisorQuery.eq('month', String(selectedPeriodValue))
+      : supervisorQuery.eq('week', selectedWeek)
 
-    const [statsResult, periodsResult] = await Promise.all([query, periodQuery])
-    const { data: rawStats, error: statsError } = statsResult
+    const supervisorsPromise = isAgent
+      ? Promise.resolve({ data: [], error: null })
+      : supervisorQuery
+
+    const [statsResult, periodsResult, supervisorsResult] = await Promise.all([
+      query,
+      supabaseAdmin.rpc('get_stats_period_values', {
+        p_period_type: periodType,
+        p_agent_name: isAgent ? resolvedAgentName || userName : null,
+      }),
+      supervisorsPromise,
+    ])
+    const { data: rawStats, error: statsError, count: statsCount } = statsResult
 
     if (statsError) {
       console.error('Stats fetch error:', statsError)
@@ -164,44 +290,31 @@ export async function GET(request: NextRequest) {
       console.error('Stats period fetch error:', periodsResult.error)
     }
 
-    const availablePeriods = Array.from(
-      new Set(
-        ((periodsResult.data || []) as Array<{
-          month?: unknown
-          name?: string | null
-          week?: unknown
-        }>)
-          .filter(stat =>
-            userRole.toLowerCase() !== 'agent' ||
-            getFuzzyNameScore(stat.name, userName) >= FUZZY_NAME_MATCH_THRESHOLD
-          )
-          .map(stat => Number(isMonthly ? stat.month : stat.week))
-          .filter(period => Number.isInteger(period) && period > 0)
-      )
-    ).sort((a, b) => b - a)
+    const availablePeriods = ((periodsResult.data || []) as Array<{ period_value?: unknown }>)
+      .map((period) => Number(period.period_value))
+      .filter((period) => Number.isInteger(period) && period > 0)
 
-    const statsForWeek = rawStats || []
+    // The generated schema does not yet include stats_month, so the dynamic
+    // table query cannot infer this shared projection even though both tables
+    // expose the same report columns.
+    const statsForWeek = (rawStats || []) as unknown as StatsRow[]
 
     // Filter by agent name for agent users using fuzzy matching
-    const agentStats = userRole.toLowerCase() === 'agent'
+    const agentStats = isAgent
       ? statsForWeek.filter(stat => getFuzzyNameScore(stat.name, userName) >= FUZZY_NAME_MATCH_THRESHOLD)
       : statsForWeek
 
-    const selectedRange = isMonthly
-      ? 1
-      : agentStats.length > 0
-        ? Math.max(...agentStats.map(stat => stat.range))
-        : getStatsWeekRange()
-
-    const stats = isMonthly
-      ? agentStats
-      : agentStats.filter(stat => stat.range === selectedRange)
+    const stats = agentStats
 
     // If team leader/supervisor, also return list of unique supervisors for filtering
     let supervisors: string[] = []
-    if (userRole.toLowerCase() !== 'agent') {
+    if (!isAgent) {
       const uniqueSupervisors = Array.from(
-        new Set(agentStats.map(stat => stat.supervisor).filter(Boolean))
+        new Set(
+          ((supervisorsResult.data || []) as Array<{ supervisor?: string | null }>)
+            .map((stat) => stat.supervisor)
+            .filter((supervisor): supervisor is string => Boolean(supervisor))
+        )
       )
       supervisors = uniqueSupervisors
     }
@@ -215,6 +328,9 @@ export async function GET(request: NextRequest) {
       periodType,
       periodValue: selectedPeriodValue,
       availablePeriods,
+      total: statsCount || 0,
+      page,
+      pageSize,
     })
   } catch (error) {
     console.error('Stats API error:', error)

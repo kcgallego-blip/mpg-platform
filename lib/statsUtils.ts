@@ -54,8 +54,10 @@ export function getStatsMonthName(month: number, referenceDate = new Date()): st
   }).format(new Date(referenceDate.getFullYear(), month - 1, 1))
 }
 
-export function getStatsMonthOptions(): number[] {
-  return [5, 6, 7]
+export function getStatsMonthOptions(referenceDate = new Date()): number[] {
+  const currentMonth = referenceDate.getMonth() + 1
+
+  return Array.from({ length: currentMonth }, (_, index) => index + 1)
 }
 
 export function getStatsPeriodLabel(

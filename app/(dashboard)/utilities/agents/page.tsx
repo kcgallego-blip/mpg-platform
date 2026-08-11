@@ -282,7 +282,7 @@ export default function AgentsPage() {
     try {
       const { data, error: dbError } = await supabase
         .from('agents')
-        .select('*')
+        .select('name, email, team_leader, role, off_1, off_2, start_shift, end_shift, comments, present')
         .order('name', { ascending: true })
 
       if (dbError) throw dbError
@@ -377,12 +377,10 @@ export default function AgentsPage() {
           .from('agents')
           .update(payload)
           .eq('name', editingName)
-          .select()
-          .single()
 
         if (updateError) throw updateError
       } else {
-        const { error: insertError } = await supabase.from('agents').insert(payload).select().single()
+        const { error: insertError } = await supabase.from('agents').insert(payload)
         if (insertError) throw insertError
       }
 

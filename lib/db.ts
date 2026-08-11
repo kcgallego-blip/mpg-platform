@@ -1,5 +1,17 @@
 import { supabase } from './supabase'
 import type { Database } from './supabase'
+import { TICKET_DETAIL_COLUMNS, TICKET_LIST_COLUMNS } from './dbColumns'
+
+const REPORT_COLUMNS = 'id, user_id, title, description, report_data, report_type, export_format, created_at, updated_at'
+const REPORT_LIST_COLUMNS = 'id, user_id, title, description, report_type, export_format, created_at, updated_at'
+const FIVE9_COLUMNS = 'id, name, start_time, end_time, created_at'
+const ANALYTICS_COLUMNS = 'id, user_id, metric_name, metric_value, metric_date, created_at'
+const USER_PROFILE_COLUMNS = 'email, name, role, registered_at, access, avatar_image, is_active, last_login'
+
+export type AccountUser = Pick<
+  Database['public']['Tables']['users']['Row'],
+  'email' | 'name' | 'role' | 'registered_at' | 'access' | 'avatar_image' | 'is_active' | 'last_login'
+>
 
 // ============================================================================
 // REPORTS FUNCTIONS
@@ -8,7 +20,7 @@ import type { Database } from './supabase'
 export async function getUserReports(userId: string) {
   const { data, error } = await supabase
     .from('reports')
-    .select('*')
+    .select(REPORT_LIST_COLUMNS)
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
 
@@ -19,7 +31,7 @@ export async function getUserReports(userId: string) {
 export async function getReport(reportId: string) {
   const { data, error } = await supabase
     .from('reports')
-    .select('*')
+    .select(REPORT_COLUMNS)
     .eq('id', reportId)
     .single()
 
@@ -41,7 +53,7 @@ export async function createReport(
       report_data: reportData,
       report_type: reportType,
     })
-    .select()
+    .select(REPORT_COLUMNS)
     .single()
 
   if (error) throw error
@@ -56,7 +68,7 @@ export async function updateReport(
     .from('reports')
     .update(updates)
     .eq('id', reportId)
-    .select()
+    .select(REPORT_COLUMNS)
     .single()
 
   if (error) throw error
@@ -81,7 +93,7 @@ export async function createTicket(ticketData: Partial<Database['public']['Table
   const { data, error } = await supabase
     .from('tickets')
     .insert(ticketData)
-    .select()
+    .select('ticketid')
     .single()
 
   if (error) {
@@ -99,19 +111,21 @@ export async function createTicket(ticketData: Partial<Database['public']['Table
 export async function getTickets() {
   const { data, error } = await supabase
     .from('tickets')
-    .select('*')
+    .select(TICKET_LIST_COLUMNS)
     .order('date', { ascending: false })
     .order('start_time', { ascending: false })
+    .limit(50)
 
   if (error) throw error
-  return data as Database['public']['Tables']['tickets']['Row'][]
+  return data
 }
 
 export async function getFive9Logouts() {
   const { data, error } = await supabase
     .from('five9')
-    .select('*')
+    .select(FIVE9_COLUMNS)
     .order('created_at', { ascending: false })
+    .limit(50)
 
   if (error) throw error
   return data as Database['public']['Tables']['five9']['Row'][]
@@ -121,8 +135,9 @@ export async function getFive9LogoutIssues() {
   // Get all five9 logout records
   const { data, error } = await supabase
     .from('five9')
-    .select('*')
+    .select(FIVE9_COLUMNS)
     .order('created_at', { ascending: false })
+    .limit(50)
 
   if (error) throw error
   return data
@@ -175,7 +190,7 @@ export async function updateTicket(ticketId: number, updates: Partial<Database['
     .from('tickets')
     .update(updates)
     .eq('ticketid', ticketId)
-    .select()
+    .select(TICKET_DETAIL_COLUMNS)
     .single()
 
   if (error) throw error
@@ -237,7 +252,7 @@ export async function getAnalytics(
 ) {
   let query = supabase
     .from('analytics')
-    .select('*')
+    .select(ANALYTICS_COLUMNS)
     .eq('user_id', userId)
 
   if (metricName) {
@@ -252,7 +267,7 @@ export async function getAnalytics(
     query = query.lte('metric_date', endDate)
   }
 
-  const { data, error } = await query.order('metric_date', { ascending: false })
+  const { data, error } = await query.order('metric_date', { ascending: false }).limit(50)
 
   if (error) throw error
   return data
@@ -273,7 +288,7 @@ export async function recordMetric(
       metric_category: metricCategory,
       metric_date: new Date().toISOString().split('T')[0],
     })
-    .select()
+    .select(ANALYTICS_COLUMNS)
     .single()
 
   if (error) throw error
@@ -287,7 +302,7 @@ export async function recordMetric(
 export async function getUserProfile(email: string) {
   const { data, error } = await supabase
     .from('users')
-    .select('*')
+    .select(USER_PROFILE_COLUMNS)
     .eq('email', email)
     .single()
 
@@ -303,7 +318,7 @@ export async function updateUserProfile(
     .from('users')
     .update(updates)
     .eq('email', email)
-    .select()
+    .select(USER_PROFILE_COLUMNS)
     .single()
 
   if (error) throw error
@@ -313,47 +328,38 @@ export async function updateUserProfile(
 export async function getUsers() {
   const { data, error } = await supabase
     .from('users')
-    .select('*')
+    .select(USER_PROFILE_COLUMNS)
     .order('registered_at', { ascending: false })
 
   if (error) throw error
-  return data as Database['public']['Tables']['users']['Row'][]
+  return (data || []) as AccountUser[]
 }
 
 export async function updateUserStatus(email: string, is_active: boolean) {
-  const { data, error } = await supabase
+  const { error } = await supabase
     .from('users')
     .update({ is_active })
     .eq('email', email)
-    .select()
-    .single()
 
   if (error) throw error
-  return data
 }
 
 export async function updateUserRole(email: string, role: string | null) {
-  const { data, error } = await supabase
+  const { error } = await supabase
     .from('users')
     .update({ role })
     .eq('email', email)
-    .select()
-    .single()
 
   if (error) throw error
-  return data
 }
 
 export async function updateUserName(email: string, name: string | null) {
-  const { data, error } = await supabase
+  const { error } = await supabase
     .from('users')
     .update({ name })
     .eq('email', email)
-    .select()
-    .single()
 
   if (error) throw error
-  return data
 }
 
 // ============================================================================

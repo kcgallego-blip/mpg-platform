@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase'
+import { TICKET_DETAIL_COLUMNS } from '@/lib/dbColumns'
 import { getAuthenticatedDbUser } from '@/lib/sessionAuth'
 import { NextRequest, NextResponse } from 'next/server'
 
@@ -89,7 +90,7 @@ export async function GET(
 
     const { data, error } = await supabase
       .from('tickets')
-      .select('*')
+      .select(TICKET_DETAIL_COLUMNS)
       .eq('ticketid', parseInt(ticketId))
       .single()
 

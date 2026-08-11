@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { STATS_COLUMNS, STATS_MONTH_COLUMNS } from '@/lib/dbColumns'
 import { getAuthenticatedDbUser } from '@/lib/sessionAuth'
-import { supabase } from '@/lib/supabase'
+import { canUploadStats } from '@/lib/statsAccess'
+import { supabaseAdmin } from '@/lib/supabaseAdmin'
 
 const parseWeek = (value: unknown) => {
   const week = typeof value === 'string' || typeof value === 'number' ? Number(value) : NaN
@@ -29,10 +31,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
     }
 
-    // Verify user is admin (basic check - could be enhanced with proper role system)
-    const userRole = dbUser.role?.toLowerCase()
-    if (!['admin', 'manager', 'team leader', 'supervisor'].includes(userRole || '')) {
-      return NextResponse.json({ error: 'Unauthorized - Admin, Manager, Team Leader, or Supervisor only' }, { status: 403 })
+    if (!canUploadStats(dbUser.role)) {
+      return NextResponse.json(
+        { error: 'Unauthorized - Admin, Manager, Operations Manager, Team Leader, or Supervisor only' },
+        { status: 403 }
+      )
     }
 
     const defaultSupervisor = dbUser.name || ''
@@ -133,9 +136,9 @@ export async function POST(request: NextRequest) {
     // Capture existing rows so a failed import can restore the previous week data.
     const tableName = selectedPeriodType === 'monthly' ? 'stats_month' : 'stats'
 
-    const { data: existingRows, error: fetchExistingError } = await supabase
+    const { data: existingRows, error: fetchExistingError } = await supabaseAdmin
       .from(tableName)
-      .select('*')
+      .select(selectedPeriodType === 'monthly' ? STATS_MONTH_COLUMNS : STATS_COLUMNS)
       .eq(selectedPeriodType === 'monthly' ? 'month' : 'week', selectedPeriodType === 'monthly' ? String(selectedMonth) : selectedWeek)
 
     if (fetchExistingError) {
@@ -146,7 +149,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Overwrite all stats for the selected week before inserting the new range.
-    const { error: deleteError } = await supabase
+    const { error: deleteError } = await supabaseAdmin
       .from(tableName)
       .delete()
       .eq(selectedPeriodType === 'monthly' ? 'month' : 'week', selectedPeriodType === 'monthly' ? String(selectedMonth) : selectedWeek)
@@ -167,14 +170,14 @@ export async function POST(request: NextRequest) {
     const batchSize = 100
     for (let i = 0; i < dbRecords.length; i += batchSize) {
       const batch = dbRecords.slice(i, i + batchSize)
-      const { error } = await supabase.from(tableName).insert(batch)
+      const { error } = await supabaseAdmin.from(tableName).insert(batch)
 
       if (error) {
         failureCount += batch.length
         errors.push(`Batch ${Math.floor(i / batchSize)}: ${error.message}`)
 
         if (!restoreAttempted && existingRows && existingRows.length > 0) {
-          const { error: deletePartialError } = await supabase
+          const { error: deletePartialError } = await supabaseAdmin
             .from(tableName)
             .delete()
             .eq(selectedPeriodType === 'monthly' ? 'month' : 'week', selectedPeriodType === 'monthly' ? String(selectedMonth) : selectedWeek)
@@ -182,7 +185,7 @@ export async function POST(request: NextRequest) {
           if (deletePartialError) {
             errors.push(`Failed to clear partial import: ${deletePartialError.message}`)
           } else {
-            const { error: restoreError } = await supabase.from(tableName).insert(existingRows)
+            const { error: restoreError } = await supabaseAdmin.from(tableName).insert(existingRows)
             if (restoreError) {
               errors.push(`Failed to restore previous stats: ${restoreError.message}`)
             }

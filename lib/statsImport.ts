@@ -7,6 +7,7 @@
  */
 
 import { supabase } from './supabase'
+import { STATS_COLUMNS } from './dbColumns'
 import { getStatsWeekNumber, getStatsWeekRange } from './statsUtils'
 
 export interface CSVStat {
@@ -120,7 +121,7 @@ export async function importStatsFromCSV(
 
     const { data: existingRows, error: fetchExistingError } = await supabase
       .from('stats')
-      .select('*')
+      .select(STATS_COLUMNS)
       .eq('week', week)
 
     if (fetchExistingError) {

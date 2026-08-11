@@ -1,8 +1,9 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { CalendarDays, Clock, LogIn, LogOut, UserX, Users, Grid3x3, Table2 } from 'lucide-react'
+import { CalendarDays, Clock, Grid3x3, Loader2, LogIn, LogOut, RefreshCw, Table2, UserX, Users } from 'lucide-react'
 import { useAuthStore } from '@/lib/authStore'
+import { getClientCache, invalidateClientCache, setClientCache } from '@/lib/clientCache'
 
 type ScheduleAgent = {
   id: string
@@ -48,7 +49,7 @@ type Lane = {
 }
 
 const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const fiveMinutes = 5 * 60 * 1000
+const STAFFING_CACHE_TTL_MS = 5 * 60 * 1000
 
 const getPhilippineDate = (date: Date) => {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -166,20 +167,6 @@ const getShiftKey = (date: Date) =>
     date.getDate()
   ).padStart(2, '0')}`
 
-const getMillisecondsUntilNextFiveMinuteMark = (date: Date) => {
-  const phDate = getPhilippineDate(date)
-  const next = new Date(phDate)
-  const nextMinute = Math.ceil((phDate.getMinutes() + 1) / 5) * 5
-
-  next.setMinutes(nextMinute, 0, 0)
-
-  if (next <= phDate) {
-    next.setMinutes(next.getMinutes() + 5)
-  }
-
-  return Math.max(next.getTime() - phDate.getTime(), 1000)
-}
-
 const formatShiftDate = (date: Date) =>
   new Intl.DateTimeFormat('en-US', {
     month: 'short',
@@ -208,7 +195,9 @@ export default function StaffingPage() {
   const [now, setNow] = useState(() => new Date())
   const [viewType, setViewType] = useState<'kanban' | 'table'>('kanban')
 
-  const loadSchedule = useCallback(async (showLoading = false) => {
+  const loadSchedule = useCallback(async (showLoading = false, force = false) => {
+    if (!user?.email) return
+
     try {
       if (showLoading) {
         setIsLoading(true)
@@ -216,16 +205,20 @@ export default function StaffingPage() {
 
       setError('')
 
-      const teamLeaderFilter = user?.name ? `?teamLeader=${encodeURIComponent(user.name)}` : ''
-      const response = await fetch(`/api/schedule${teamLeaderFilter}`, { cache: 'no-store' })
-      const data = (await response.json()) as Partial<ScheduleResponse> & { error?: string }
+      const cacheKey = `staffing:${user.email}`
+      if (force) invalidateClientCache(cacheKey)
+      let data = force ? null : getClientCache<ScheduleResponse>(cacheKey)
 
-      if (!response.ok) {
-        throw new Error(data.error || 'Unable to load schedule')
+      if (!data) {
+        const response = await fetch('/api/schedule', { cache: 'no-store' })
+        const payload = (await response.json()) as Partial<ScheduleResponse> & { error?: string }
+        if (!response.ok) throw new Error(payload.error || 'Unable to load schedule')
+        data = { agents: payload.agents || [], supervisors: payload.supervisors || [] }
+        setClientCache(cacheKey, data, STAFFING_CACHE_TTL_MS)
       }
 
-      const nextAgents = data.agents || []
-      const nextSupervisors = data.supervisors || []
+      const nextAgents = data.agents
+      const nextSupervisors = data.supervisors
       const preferredSupervisor = normalizeNameValue(user?.name)
       const matchingSupervisor = nextSupervisors.find(
         (supervisor) => normalizeNameValue(supervisor) === preferredSupervisor
@@ -233,6 +226,7 @@ export default function StaffingPage() {
 
       setAgents(nextAgents)
       setSupervisors(nextSupervisors)
+      setNow(new Date())
       setSelectedSupervisors((current) => {
         if (current.length > 0) {
           return current
@@ -251,32 +245,10 @@ export default function StaffingPage() {
         setIsLoading(false)
       }
     }
-  }, [user?.name])
+  }, [user?.email, user?.name])
 
   useEffect(() => {
-    loadSchedule(true)
-  }, [loadSchedule])
-
-  useEffect(() => {
-    let interval: number | undefined
-
-    const timeout = window.setTimeout(() => {
-      setNow(new Date())
-      loadSchedule()
-
-      interval = window.setInterval(() => {
-        setNow(new Date())
-        loadSchedule()
-      }, fiveMinutes)
-    }, getMillisecondsUntilNextFiveMinuteMark(new Date()))
-
-    return () => {
-      window.clearTimeout(timeout)
-
-      if (interval) {
-        window.clearInterval(interval)
-      }
-    }
+    void loadSchedule(true)
   }, [loadSchedule])
 
   const roleOptions = useMemo(
@@ -335,6 +307,10 @@ export default function StaffingPage() {
       if (!response.ok) {
         throw new Error(data.error || 'Unable to update agent presence')
       }
+      if (user?.email) {
+        const nextAgents = agents.map((item) => item.id === agentId ? { ...item, present: nextPresent } : item)
+        setClientCache(`staffing:${user.email}`, { agents: nextAgents, supervisors }, STAFFING_CACHE_TTL_MS)
+      }
     } catch (updateError: any) {
       setAgents((current) =>
         current.map((item) => (item.id === agentId ? { ...item, present: previousPresent } : item))
@@ -343,7 +319,7 @@ export default function StaffingPage() {
     } finally {
       setIsUpdatingPresence(false)
     }
-  }, [agents])
+  }, [agents, supervisors, user?.email])
 
   const handleAgentCardClick = useCallback(
     (agent: BoardAgent) => {
@@ -577,6 +553,16 @@ export default function StaffingPage() {
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void loadSchedule(true, true)}
+              disabled={isLoading}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-outline-variant px-3 text-sm font-semibold text-on-surface transition hover:border-primary-container disabled:opacity-50"
+              title="Refresh staffing data"
+            >
+              {isLoading ? <Loader2 size={18} className="animate-spin" /> : <RefreshCw size={18} />}
+              Refresh
+            </button>
             <button
               onClick={() => setViewType('kanban')}
               className={`rounded-lg p-2 transition ${

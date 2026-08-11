@@ -1,41 +1,33 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowDownUp, BarChart3, CalendarDays, Clock3, Download, Loader2, RefreshCw, Table2, X } from 'lucide-react'
+import { ArrowDownUp, BarChart3, CalendarDays, ChevronLeft, ChevronRight, Clock3, Download, Loader2, RefreshCw, Table2, X } from 'lucide-react'
 import { useAuthStore } from '@/lib/authStore'
 import { useFeatureSettingsStore } from '@/lib/featureSettingsStore'
 import { supabase } from '@/lib/supabase'
+import { getClientCache, invalidateClientCache, setClientCache } from '@/lib/clientCache'
 import {
   TPH_STATUS_DISPLAY_COLUMNS,
   TphDataSource,
-  calculateAgentMetrics,
   calculateMetricsFromRawDuration,
   calculateTicketsPerHour,
   getStatusFilteredCounts,
   getTotalTicketCount,
   getTphDataSourceForShiftDate,
-  normalizeNameForMatch,
   parseHourlyTickets,
   parseSummaryTickets,
 } from '@/lib/tphProductivity'
 
 type ProductivityView = 'status' | 'hour'
 
-type TphTicket = {
+type ProductivityTicketDetail = {
   ticket_num: number
-  agent: string | null
   status: string | null
-  shift_date: string | null
-  created_at: string
 }
 
 type UserNameRow = {
   email: string
   name: string | null
-}
-
-type TeamAgentRow = {
-  name: string
 }
 
 type TphSummaryRow = {
@@ -70,8 +62,23 @@ type SortedAgentSummary = {
   shiftDurationMs: number
 }
 
+type ProductivityCacheEntry = {
+  dataSource: TphDataSource
+  rows: AgentProductivity[]
+}
+
+type ProductivityTicketPage = {
+  tickets: ProductivityTicketDetail[]
+  total: number
+  page: number
+  pageSize: number
+}
+
 const STATUS_COLUMNS = [...TPH_STATUS_DISPLAY_COLUMNS]
 const STATUS_FILTERS = ['All', ...STATUS_COLUMNS]
+const PRODUCTIVITY_CACHE_TTL_MS = 60 * 1000
+const HISTORICAL_PRODUCTIVITY_CACHE_TTL_MS = 24 * 60 * 60 * 1000
+const PRODUCTIVITY_TICKET_PAGE_SIZE = 25
 
 const getPhilippineDate = (date: Date) => {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -132,11 +139,6 @@ const getEmailFallbackName = (email: string) => {
     .filter(Boolean)
     .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
     .join(' ') || email
-}
-
-const getHourKeyFromTimestamp = (timestamp: string) => {
-  const phDate = getPhilippineDate(new Date(timestamp))
-  return String(phDate.getHours()).padStart(2, '0')
 }
 
 const formatTicketTime = (timestamp: string | null) => {
@@ -229,7 +231,6 @@ export default function ProductivityPage() {
     (state) => state.loadedFor
   )
   const loadFeatureSettings = useFeatureSettingsStore((state) => state.load)
-  const [tickets, setTickets] = useState<TphTicket[]>([])
   const [productivityRows, setProductivityRows] = useState<AgentProductivity[]>([])
   const [dataSource, setDataSource] = useState<TphDataSource>('tph')
   const [selectedShiftDate, setSelectedShiftDate] = useState(() => getDateKey(getShiftDate(new Date())))
@@ -242,15 +243,13 @@ export default function ProductivityPage() {
   const [error, setError] = useState('')
   const [sortedAgentSummaries, setSortedAgentSummaries] = useState<SortedAgentSummary[]>([])
   const [selectedAgentEmail, setSelectedAgentEmail] = useState<string | null>(null)
+  const [selectedAgentTickets, setSelectedAgentTickets] = useState<ProductivityTicketDetail[]>([])
+  const [selectedAgentTicketPage, setSelectedAgentTicketPage] = useState(1)
+  const [selectedAgentTicketTotal, setSelectedAgentTicketTotal] = useState(0)
+  const [isLoadingAgentTickets, setIsLoadingAgentTickets] = useState(false)
 
   const currentShiftDate = useMemo(() => getDateKey(getShiftDate(new Date())), [])
   const showTphColumn = true
-
-  const getVisibleRowsForRole = useCallback(async (
-    rows: AgentProductivity[],
-    _rowNames: Record<string, string>
-  ) => rows,
-  [])
 
   const getNamesByEmail = useCallback(async (emails: string[]) => {
     if (emails.length === 0) return {}
@@ -268,7 +267,9 @@ export default function ProductivityPage() {
     }, {})
   }, [])
 
-  const loadProductivity = useCallback(async (showFullLoader = false) => {
+  const loadProductivity = useCallback(async (showFullLoader = false, force = false) => {
+    if (!user?.email) return
+
     try {
       if (showFullLoader) {
         setIsLoading(true)
@@ -280,13 +281,49 @@ export default function ProductivityPage() {
 
       const nextDataSource = getTphDataSourceForShiftDate(selectedShiftDate, currentShiftDate)
       setDataSource(nextDataSource)
+      const cachePrefix = `productivity:${user.email}:`
+      const cacheKey = `${cachePrefix}${selectedShiftDate}:${selectedStatus}`
+      if (force) invalidateClientCache(cachePrefix)
+      const cached = force ? null : getClientCache<ProductivityCacheEntry>(cacheKey)
+
+      if (cached) {
+        setDataSource(cached.dataSource)
+        setProductivityRows(cached.rows)
+        return
+      }
 
       if (nextDataSource === 'tph_summary') {
-        const { data: summaryData, error: summaryError } = await supabase
+        const normalizedRole = user.role?.trim().toLowerCase() || ''
+        let visibleAgentKeys: string[] | null = null
+
+        if (normalizedRole === 'agent') {
+          visibleAgentKeys = Array.from(new Set([user.email, user.name].filter(Boolean))) as string[]
+        } else if (['team leader', 'supervisor'].includes(normalizedRole) && user.name) {
+          const { data: teamAgents, error: teamAgentsError } = await supabase
+            .from('agents')
+            .select('email')
+            .ilike('team_leader', user.name)
+
+          if (teamAgentsError) throw teamAgentsError
+          visibleAgentKeys = ((teamAgents || []) as Array<{ email: string | null }>)
+            .map((agent) => agent.email)
+            .filter((email): email is string => Boolean(email))
+        }
+
+        if (visibleAgentKeys?.length === 0) {
+          setProductivityRows([])
+          setClientCache(cacheKey, { dataSource: nextDataSource, rows: [] }, HISTORICAL_PRODUCTIVITY_CACHE_TTL_MS)
+          return
+        }
+
+        let summaryQuery = supabase
           .from('tph_summary')
           .select('shift_date, agent, tickets, hourly_tickets, created_at')
           .eq('shift_date', selectedShiftDate)
           .order('agent', { ascending: true })
+
+        if (visibleAgentKeys) summaryQuery = summaryQuery.in('agent', visibleAgentKeys)
+        const { data: summaryData, error: summaryError } = await summaryQuery
 
         if (summaryError) throw summaryError
 
@@ -315,108 +352,29 @@ export default function ProductivityPage() {
           }
         }).filter((row) => selectedStatus === 'All' || row.total > 0)
 
-        setTickets([])
-        setProductivityRows(await getVisibleRowsForRole(nextRows, namesByEmail))
+        setProductivityRows(nextRows)
+        setClientCache(cacheKey, { dataSource: nextDataSource, rows: nextRows }, HISTORICAL_PRODUCTIVITY_CACHE_TTL_MS)
         return
       }
 
-      let tphQuery = supabase
-        .from('tph')
-        .select('ticket_num, agent, status, shift_date, created_at')
-        .eq('shift_date', selectedShiftDate)
-        .order('created_at', { ascending: true })
-
-      if (selectedStatus !== 'All') {
-        tphQuery = tphQuery.ilike('status', selectedStatus)
-      }
-
-      const TPH_PAGE_SIZE = 1000
-      const allTphData: TphTicket[] = []
-
-      for (let start = 0; ; start += TPH_PAGE_SIZE) {
-        const { data: tphData, error: tphError } = await tphQuery.range(start, start + TPH_PAGE_SIZE - 1)
-
-        if (tphError) throw tphError
-
-        const pageRows = (tphData || []) as TphTicket[]
-        allTphData.push(...pageRows)
-
-        if (!pageRows || pageRows.length < TPH_PAGE_SIZE) {
-          break
-        }
-      }
-
-      const nextTickets = allTphData
-      const emails = Array.from(
-        new Set(nextTickets.map((ticket) => ticket.agent).filter((email): email is string => !!email))
-      )
-      const namesByEmail = await getNamesByEmail(emails)
-      const rowsByEmail = new Map<string, AgentProductivity>()
-      const ticketsByEmail = new Map<string, TphTicket[]>()
-
-      nextTickets.forEach((ticket) => {
-        if (!ticket.agent) return
-
-        const existingRow = rowsByEmail.get(ticket.agent)
-        const row = existingRow || {
-          email: ticket.agent,
-          name: namesByEmail[ticket.agent] || getEmailFallbackName(ticket.agent),
-          total: 0,
-          statusCounts: {},
-          hourlyCounts: {},
-          tphAverage: 0,
-          firstTicketTime: null,
-          latestTicketTime: null,
-          shiftDuration: '0h 0m',
-          shiftDurationMs: 0,
-          source: 'tph' as TphDataSource,
-        }
-
-        const status = ticket.status || 'No Status'
-        const hourKey = getHourKeyFromTimestamp(ticket.created_at)
-        const createdAtTime = Date.parse(ticket.created_at)
-        const firstTime = row.firstTicketTime ? Date.parse(row.firstTicketTime) : createdAtTime
-        const latestTime = row.latestTicketTime ? Date.parse(row.latestTicketTime) : createdAtTime
-
-        row.total += 1
-        row.statusCounts[status] = (row.statusCounts[status] || 0) + 1
-        row.hourlyCounts[hourKey] = (row.hourlyCounts[hourKey] || 0) + 1
-        ticketsByEmail.set(ticket.agent, [...(ticketsByEmail.get(ticket.agent) || []), ticket])
-
-        if (!row.firstTicketTime || createdAtTime < firstTime) {
-          row.firstTicketTime = ticket.created_at
-        }
-
-        if (!row.latestTicketTime || createdAtTime > latestTime) {
-          row.latestTicketTime = ticket.created_at
-        }
-
-        rowsByEmail.set(ticket.agent, row)
+      const params = new URLSearchParams({ shiftDate: selectedShiftDate, status: selectedStatus })
+      const response = await fetch(`/api/productivity/summary?${params.toString()}`, {
+        cache: 'no-store',
+        credentials: 'include',
       })
+      const payload = await response.json() as { agents?: AgentProductivity[]; error?: string }
+      if (!response.ok) throw new Error(payload.error || 'Failed to load productivity data')
 
-      const nextRows = Array.from(rowsByEmail.values()).map((row) => {
-        const metrics = calculateAgentMetrics(ticketsByEmail.get(row.email) || [])
-
-        return {
-          ...row,
-          tphAverage: metrics.tph,
-          shiftDurationMs: metrics.netDurationMinutes * 60 * 1000,
-          shiftDuration: metrics.formattedNetDuration,
-        }
-      })
-
-      const visibleRows = await getVisibleRowsForRole(nextRows, namesByEmail)
-      const visibleEmails = new Set(visibleRows.map((row) => row.email))
-
-      setTickets(nextTickets.filter((ticket) => ticket.agent && visibleEmails.has(ticket.agent)))
+      const visibleRows = payload.agents || []
       setProductivityRows(visibleRows)
+      setClientCache(cacheKey, { dataSource: nextDataSource, rows: visibleRows }, PRODUCTIVITY_CACHE_TTL_MS)
     } catch (err: any) {
       setError(err.message || 'Failed to load productivity data')
     } finally {
       setIsLoading(false)
       setIsRefreshing(false)
     }
-  }, [currentShiftDate, getNamesByEmail, getVisibleRowsForRole, selectedShiftDate, selectedStatus])
+  }, [currentShiftDate, getNamesByEmail, selectedShiftDate, selectedStatus, user?.email, user?.name, user?.role])
 
   useEffect(() => {
     loadProductivity(true)
@@ -436,32 +394,73 @@ export default function ProductivityPage() {
     try {
       setIsSorting(true)
       setError('')
-
-      const params = new URLSearchParams({
-        shiftDate: selectedShiftDate,
-        status: selectedStatus,
-      })
-
-      const response = await fetch(`/api/productivity/sorted?${params.toString()}`, {
-        cache: 'no-store',
-        credentials: 'include',
-      })
-      const data = (await response.json()) as {
-        agents?: SortedAgentSummary[]
-        error?: string
-      }
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Unable to sort productivity data')
-      }
-
-      setSortedAgentSummaries(data.agents || [])
+      const sorted = [...productivityRows]
+        .sort((first, second) => first.total - second.total || first.name.localeCompare(second.name))
+        .map<SortedAgentSummary>((row) => ({
+          email: row.email,
+          name: row.name,
+          totalTickets: row.total,
+          firstTicketTime: row.firstTicketTime,
+          latestTicketTime: row.latestTicketTime,
+          shiftDuration: row.shiftDuration,
+          shiftDurationMs: row.shiftDurationMs,
+        }))
+      setSortedAgentSummaries(sorted)
     } catch (err: any) {
       setError(err.message || 'Unable to sort productivity data')
     } finally {
       setIsSorting(false)
     }
-  }, [selectedShiftDate, selectedStatus])
+  }, [productivityRows])
+
+  useEffect(() => {
+    if (!selectedAgentEmail || dataSource !== 'tph' || !user?.email) {
+      setSelectedAgentTickets([])
+      setSelectedAgentTicketTotal(0)
+      return
+    }
+
+    let cancelled = false
+    const loadAgentTickets = async () => {
+      setIsLoadingAgentTickets(true)
+
+      try {
+        const params = new URLSearchParams({
+          shiftDate: selectedShiftDate,
+          status: selectedStatus,
+          agent: selectedAgentEmail,
+          page: String(selectedAgentTicketPage),
+          pageSize: String(PRODUCTIVITY_TICKET_PAGE_SIZE),
+        })
+        const cacheKey = `productivity-tickets:${user.email}:${params.toString()}`
+        let payload = getClientCache<ProductivityTicketPage>(cacheKey)
+
+        if (!payload) {
+          const response = await fetch(`/api/productivity/tickets?${params.toString()}`, {
+            cache: 'no-store',
+            credentials: 'include',
+          })
+          payload = await response.json() as ProductivityTicketPage
+          if (!response.ok) {
+            throw new Error((payload as ProductivityTicketPage & { error?: string }).error || 'Unable to load agent tickets')
+          }
+          setClientCache(cacheKey, payload, PRODUCTIVITY_CACHE_TTL_MS)
+        }
+
+        if (!cancelled) {
+          setSelectedAgentTickets(payload.tickets || [])
+          setSelectedAgentTicketTotal(payload.total || 0)
+        }
+      } catch (ticketError) {
+        if (!cancelled) setError(ticketError instanceof Error ? ticketError.message : 'Unable to load agent tickets')
+      } finally {
+        if (!cancelled) setIsLoadingAgentTickets(false)
+      }
+    }
+
+    void loadAgentTickets()
+    return () => { cancelled = true }
+  }, [dataSource, selectedAgentEmail, selectedAgentTicketPage, selectedShiftDate, selectedStatus, user?.email])
 
   const downloadProductivityReport = useCallback(async () => {
     try {
@@ -557,10 +556,7 @@ export default function ProductivityPage() {
     )
   }, [displayedProductivityRows])
 
-  const selectedAgentTickets = useMemo(() => {
-    if (!selectedAgentEmail) return []
-    return tickets.filter((ticket) => ticket.agent === selectedAgentEmail)
-  }, [selectedAgentEmail, tickets])
+  const selectedAgentTicketPages = Math.max(1, Math.ceil(selectedAgentTicketTotal / PRODUCTIVITY_TICKET_PAGE_SIZE))
 
   const maxHourlyBarValue = useMemo(() => {
     const rowValues = displayedProductivityRows.map((row) => Math.max(...Object.values(row.hourlyCounts), 0))
@@ -664,7 +660,7 @@ export default function ProductivityPage() {
 
             <button
               type="button"
-              onClick={() => loadProductivity(false)}
+              onClick={() => loadProductivity(false, true)}
               disabled={isRefreshing}
               className="flex min-h-11 items-center gap-2 rounded-lg bg-primary-container px-4 py-2 text-sm font-bold text-on-primary-container shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-70"
             >
@@ -739,7 +735,7 @@ export default function ProductivityPage() {
                 </thead>
                 <tbody className="divide-y divide-outline-variant/50">
                   {displayedProductivityRows.map((row) => (
-                    <tr key={row.email} className="cursor-pointer hover:bg-surface-container/60 transition" onClick={() => setSelectedAgentEmail(row.email)}>
+                    <tr key={row.email} className="cursor-pointer hover:bg-surface-container/60 transition" onClick={() => { setSelectedAgentTicketPage(1); setSelectedAgentTickets([]); setSelectedAgentEmail(row.email) }}>
                       <td className="min-w-64 px-4 py-3">
                         <p className="font-semibold text-on-surface">{row.name}</p>
                         <p className="text-xs text-on-surface-variant">{row.email}</p>
@@ -822,7 +818,7 @@ export default function ProductivityPage() {
                 <p className="text-xs text-on-surface-variant">{selectedAgent.email}</p>
               </div>
               <button
-                onClick={() => setSelectedAgentEmail(null)}
+                onClick={() => { setSelectedAgentEmail(null); setSelectedAgentTickets([]); setSelectedAgentTicketPage(1) }}
                 className="rounded-lg p-1 transition hover:bg-surface-container-high"
                 aria-label="Close modal"
               >
@@ -831,7 +827,11 @@ export default function ProductivityPage() {
             </div>
 
             <div className="overflow-y-auto" style={{ maxHeight: 'calc(90vh - 120px)' }}>
-              {selectedAgent.source === 'tph' ? (
+              {selectedAgent.source === 'tph' && isLoadingAgentTickets ? (
+                <div className="flex min-h-40 items-center justify-center gap-2 text-sm text-on-surface-variant">
+                  <Loader2 size={18} className="animate-spin" /> Loading tickets...
+                </div>
+              ) : selectedAgent.source === 'tph' ? (
                 <table className="min-w-full divide-y divide-outline-variant/60">
                   <thead className="bg-surface-container/60 sticky top-0">
                     <tr>
@@ -866,15 +866,22 @@ export default function ProductivityPage() {
                   </tbody>
                 </table>
               )}
-              {selectedAgent.source === 'tph' && selectedAgentTickets.length === 0 && (
+              {selectedAgent.source === 'tph' && !isLoadingAgentTickets && selectedAgentTickets.length === 0 && (
                 <div className="flex items-center justify-center border-t border-outline-variant/60 p-4 text-xs text-on-surface-variant">
                   No tickets found for this agent.
                 </div>
               )}
             </div>
 
-            <div className="border-t border-outline-variant/60 bg-surface-container/40 px-6 py-3 text-right text-xs font-semibold text-on-surface">
-              Total Tickets: {selectedAgent.total}
+            <div className="flex items-center justify-between gap-3 border-t border-outline-variant/60 bg-surface-container/40 px-6 py-3 text-xs font-semibold text-on-surface">
+              {selectedAgent.source === 'tph' && selectedAgentTicketPages > 1 ? (
+                <div className="flex items-center gap-2">
+                  <button type="button" onClick={() => setSelectedAgentTicketPage(page => Math.max(1, page - 1))} disabled={selectedAgentTicketPage === 1 || isLoadingAgentTickets} className="rounded-md border border-outline-variant p-1 disabled:opacity-40" aria-label="Previous ticket page"><ChevronLeft size={16} /></button>
+                  <span>Page {selectedAgentTicketPage} of {selectedAgentTicketPages}</span>
+                  <button type="button" onClick={() => setSelectedAgentTicketPage(page => Math.min(selectedAgentTicketPages, page + 1))} disabled={selectedAgentTicketPage === selectedAgentTicketPages || isLoadingAgentTickets} className="rounded-md border border-outline-variant p-1 disabled:opacity-40" aria-label="Next ticket page"><ChevronRight size={16} /></button>
+                </div>
+              ) : <span />}
+              <span>Total Tickets: {selectedAgent.total}</span>
             </div>
           </div>
         </div>

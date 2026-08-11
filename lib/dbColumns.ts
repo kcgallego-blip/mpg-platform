@@ -1,0 +1,63 @@
+export const TICKET_LIST_COLUMNS = [
+  'ticketid',
+  'category',
+  'concern',
+  'date',
+  'start_time',
+  'name',
+  'status',
+  'team_leader',
+  'assisted_by',
+  'reported',
+].join(', ')
+
+export const TICKET_DETAIL_COLUMNS = [
+  'ticketid',
+  'category',
+  'concern',
+  'date',
+  'start_time',
+  'name',
+  'end_time',
+  'troubleshooting',
+  'assisted_by',
+  'status',
+  'team_leader',
+  'onsite',
+  'affected_five9',
+  'webex_message_id',
+  'history',
+  'notes',
+  'reported',
+  'created_at',
+  'updated_at',
+].join(', ')
+
+export const STATS_BASE_COLUMNS = [
+  'id',
+  'supervisor',
+  'name',
+  'acw',
+  'aht',
+  'hold',
+  'talk_time',
+  'csat_score',
+  'dsat',
+  'nps_score',
+  'promoter',
+  'mod',
+  'mod_value',
+  'fcr',
+  'fcr_value',
+  'surveys_answered',
+  'calls_touched',
+  'tickets_solved',
+  'transactions',
+  'productive_hours',
+  'tph',
+  'created_at',
+  'updated_at',
+]
+
+export const STATS_COLUMNS = [...STATS_BASE_COLUMNS, 'week', 'range'].join(', ')
+export const STATS_MONTH_COLUMNS = [...STATS_BASE_COLUMNS, 'month'].join(', ')

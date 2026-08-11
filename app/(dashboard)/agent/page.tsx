@@ -3,11 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuthStore } from '@/lib/authStore'
 import { supabase } from '@/lib/supabase'
-import { AlertTriangle, BarChart3, CalendarDays, Clock3, Gauge, Loader2, RefreshCw, Sigma, Ticket, X } from 'lucide-react'
+import { getClientCache, invalidateClientCache, setClientCache } from '@/lib/clientCache'
+import { AlertTriangle, BarChart3, CalendarDays, ChevronLeft, ChevronRight, Clock3, Gauge, Loader2, RefreshCw, Sigma, Ticket, X } from 'lucide-react'
 import {
   TPH_STATUS_COLUMNS,
   TphDataSource,
-  calculateAgentMetrics,
   calculateMetricsFromRawDuration,
   getTphDataSourceForShiftDate,
   parseHourlyTickets,
@@ -16,10 +16,7 @@ import {
 
 type TphTicket = {
   ticket_num: number
-  agent: string | null
   status: string | null
-  shift_date: string | null
-  created_at: string
 }
 
 type TphSummaryRow = {
@@ -29,6 +26,35 @@ type TphSummaryRow = {
   hourly_tickets: string | null
   created_at: string
 }
+
+type HistoricalSummaryCache = {
+  row: TphSummaryRow | null
+}
+
+type ProductivitySummaryAgent = {
+  email: string
+  total: number
+  statusCounts: Record<string, number>
+  hourlyCounts: Record<string, number>
+  tphAverage: number
+  shiftDuration: string
+}
+
+type ProductivitySummaryResponse = {
+  agents: ProductivitySummaryAgent[]
+  error?: string
+}
+
+type ProductivityTicketResponse = {
+  tickets: TphTicket[]
+  total: number
+  page: number
+  pageSize: number
+  error?: string
+}
+
+const AGENT_DASHBOARD_CACHE_TTL_MS = 60 * 1000
+const AGENT_TICKET_PAGE_SIZE = 50
 
 const STATUS_LANES = [
   { key: 'Open', title: 'Open', color: 'border-red-300', header: 'bg-red-50', icon: 'bg-red-100 text-red-700', count: 'bg-red-100 text-red-800' },
@@ -183,6 +209,9 @@ export default function AgentPage() {
   const [tickets, setTickets] = useState<TphTicket[]>([])
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({})
   const [hourlyCounts, setHourlyCounts] = useState<Record<string, number>>({})
+  const [ticketPage, setTicketPage] = useState(1)
+  const [totalTicketRows, setTotalTicketRows] = useState(0)
+  const [currentMetrics, setCurrentMetrics] = useState<{ tph: number; formattedNetDuration: string } | null>(null)
   const [dataSource, setDataSource] = useState<TphDataSource>('tph')
   const [showHourlyBreakdown, setShowHourlyBreakdown] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
@@ -217,11 +246,13 @@ export default function AgentPage() {
     lastTicketDataSnapshotRef.current = snapshot
   }, [])
 
-  const loadTickets = useCallback(async (showFullLoader = false) => {
+  const loadTickets = useCallback(async (showFullLoader = false, force = false) => {
     if (!user?.email) {
       setTickets([])
       setStatusCounts({})
       setHourlyCounts({})
+      setTotalTicketRows(0)
+      setCurrentMetrics(null)
       setIsLoading(false)
       setIsRefreshing(false)
       return
@@ -238,24 +269,34 @@ export default function AgentPage() {
 
       const nextDataSource = getTphDataSourceForShiftDate(selectedShiftDate, currentShiftDate)
       setDataSource(nextDataSource)
+      const cachePrefix = `agent-dashboard:${user.email}:${selectedShiftDate}:`
+      if (force) invalidateClientCache(cachePrefix)
 
       if (nextDataSource === 'tph_summary') {
         const agentKeys = Array.from(new Set([user.email, user.name].filter(Boolean))) as string[]
-        const { data, error: summaryError } = await supabase
-          .from('tph_summary')
-          .select('shift_date, agent, tickets, hourly_tickets, created_at')
-          .eq('shift_date', selectedShiftDate)
-          .in('agent', agentKeys)
-          .limit(1)
+        const cacheKey = `${cachePrefix}historical`
+        const cachedSummary = force ? null : getClientCache<HistoricalSummaryCache>(cacheKey)
+        let summaryRow = cachedSummary?.row ?? null
 
-        if (summaryError) throw summaryError
+        if (!cachedSummary) {
+          const { data, error: summaryError } = await supabase
+            .from('tph_summary')
+            .select('shift_date, agent, tickets, hourly_tickets, created_at')
+            .eq('shift_date', selectedShiftDate)
+            .in('agent', agentKeys)
+            .limit(1)
 
-        const summaryRow = ((data || []) as TphSummaryRow[])[0]
+          if (summaryError) throw summaryError
+          summaryRow = ((data || []) as TphSummaryRow[])[0] || null
+          setClientCache(cacheKey, { row: summaryRow }, 24 * 60 * 60 * 1000)
+        }
 
         const nextStatusCounts = parseSummaryTickets(summaryRow?.tickets)
         const nextHourlyCounts = parseHourlyTickets(summaryRow?.hourly_tickets)
 
         setTickets([])
+        setTotalTicketRows(0)
+        setCurrentMetrics(null)
         setStatusCounts(nextStatusCounts)
         setHourlyCounts(nextHourlyCounts)
         trackRefreshResult(
@@ -265,29 +306,56 @@ export default function AgentPage() {
         return
       }
 
-      const { data, error: dbError } = await supabase
-        .from('tph')
-        .select('ticket_num, agent, status, shift_date, created_at')
-        .eq('agent', user.email)
-        .eq('shift_date', selectedShiftDate)
-        .order('created_at', { ascending: false })
-        .limit(10000)
+      const summaryParams = new URLSearchParams({
+        shiftDate: selectedShiftDate,
+        status: 'All',
+        agent: user.email,
+      })
+      const ticketParams = new URLSearchParams({
+        shiftDate: selectedShiftDate,
+        agent: user.email,
+        page: String(ticketPage),
+        pageSize: String(AGENT_TICKET_PAGE_SIZE),
+      })
+      const summaryCacheKey = `${cachePrefix}summary`
+      const ticketsCacheKey = `${cachePrefix}tickets:${ticketPage}`
+      let summaryResponse = force ? null : getClientCache<ProductivitySummaryResponse>(summaryCacheKey)
+      let ticketResponse = force ? null : getClientCache<ProductivityTicketResponse>(ticketsCacheKey)
 
-      if (dbError) throw dbError
+      const [freshSummary, freshTickets] = await Promise.all([
+        summaryResponse
+          ? Promise.resolve(summaryResponse)
+          : fetch(`/api/productivity/summary?${summaryParams}`).then(async (response) => {
+              const body = (await response.json()) as ProductivitySummaryResponse
+              if (!response.ok) throw new Error(body.error || 'Failed to load ticket summary')
+              setClientCache(summaryCacheKey, body, AGENT_DASHBOARD_CACHE_TTL_MS)
+              return body
+            }),
+        ticketResponse
+          ? Promise.resolve(ticketResponse)
+          : fetch(`/api/productivity/tickets?${ticketParams}`).then(async (response) => {
+              const body = (await response.json()) as ProductivityTicketResponse
+              if (!response.ok) throw new Error(body.error || 'Failed to load ticket page')
+              setClientCache(ticketsCacheKey, body, AGENT_DASHBOARD_CACHE_TTL_MS)
+              return body
+            }),
+      ])
 
-      const rawTickets = (data || []) as TphTicket[]
-      const nextStatusCounts = TPH_STATUS_COLUMNS.reduce<Record<string, number>>((counts, status) => {
-        counts[status] = rawTickets.filter((ticket) => ticket.status === status).length
-        return counts
-      }, {})
-      const nextHourlyCounts = rawTickets.reduce<Record<string, number>>((counts, ticket) => {
-        const phDate = getPhilippineDate(new Date(ticket.created_at))
-        const hourKey = String(phDate.getHours()).padStart(2, '0')
-        counts[hourKey] = (counts[hourKey] || 0) + 1
-        return counts
-      }, {})
+      summaryResponse = freshSummary
+      ticketResponse = freshTickets
+      const agentSummary = summaryResponse.agents.find(
+        (agent) => agent.email.toLowerCase() === user.email.toLowerCase()
+      )
+      const rawTickets = ticketResponse.tickets || []
+      const nextStatusCounts = agentSummary?.statusCounts || {}
+      const nextHourlyCounts = agentSummary?.hourlyCounts || {}
 
       setTickets(rawTickets)
+      setTotalTicketRows(ticketResponse.total || 0)
+      setCurrentMetrics(agentSummary ? {
+        tph: agentSummary.tphAverage,
+        formattedNetDuration: agentSummary.shiftDuration,
+      } : null)
       setStatusCounts(nextStatusCounts)
       setHourlyCounts(nextHourlyCounts)
       trackRefreshResult(
@@ -300,7 +368,7 @@ export default function AgentPage() {
       setIsLoading(false)
       setIsRefreshing(false)
     }
-  }, [currentShiftDate, selectedShiftDate, trackRefreshResult, user?.email, user?.name])
+  }, [currentShiftDate, selectedShiftDate, ticketPage, trackRefreshResult, user?.email, user?.name])
 
   useEffect(() => {
     loadTickets(true)
@@ -324,7 +392,6 @@ export default function AgentPage() {
   const ticketsByStatus = (status: string) => 
     tickets.filter(t => t.status === status)
 
-  const sourceLabel = dataSource === 'tph' ? 'raw TPH rows' : 'TPH summary rows'
   const summaryTotalTickets = useMemo(
     () => TPH_STATUS_COLUMNS.reduce((total, status) => total + (statusCounts[status] || 0), 0),
     [statusCounts]
@@ -333,12 +400,12 @@ export default function AgentPage() {
     () => hourSlots.filter((hour) => (hourlyCounts[hour.key] || 0) > 0).length,
     [hourlyCounts]
   )
-  const rawTicketMetrics = useMemo(() => calculateAgentMetrics(tickets), [tickets])
   const summaryMetrics = useMemo(
     () => calculateMetricsFromRawDuration(summaryTotalTickets, activeHourlySlots * 60),
     [activeHourlySlots, summaryTotalTickets]
   )
-  const displayedMetrics = dataSource === 'tph' ? rawTicketMetrics : summaryMetrics
+  const displayedMetrics = dataSource === 'tph' ? (currentMetrics || summaryMetrics) : summaryMetrics
+  const totalTicketPages = Math.max(1, Math.ceil(totalTicketRows / AGENT_TICKET_PAGE_SIZE))
   const maxHourlyBarValue = useMemo(() => Math.max(1, ...Object.values(hourlyCounts)), [hourlyCounts])
 
   if (isLoading) {
@@ -383,6 +450,7 @@ export default function AgentPage() {
               value={selectedShiftDate}
               onChange={(event) => {
                 if (event.target.value) {
+                  setTicketPage(1)
                   setSelectedShiftDate(event.target.value)
                 }
               }}
@@ -393,7 +461,7 @@ export default function AgentPage() {
 
           <button
             type="button"
-            onClick={() => loadTickets(false)}
+            onClick={() => loadTickets(false, true)}
             disabled={isRefreshing}
             className="flex min-h-11 items-center gap-2 rounded-lg bg-primary-container px-4 py-2 text-sm font-bold text-on-primary-container shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-70"
           >
@@ -542,6 +610,39 @@ export default function AgentPage() {
             </div>
           </div>
 
+          {totalTicketRows > AGENT_TICKET_PAGE_SIZE && (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-y border-outline-variant/60 py-3">
+              <p className="text-sm font-medium text-on-surface-variant">
+                Showing {(ticketPage - 1) * AGENT_TICKET_PAGE_SIZE + 1}-{Math.min(ticketPage * AGENT_TICKET_PAGE_SIZE, totalTicketRows)} of {totalTicketRows}
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setTicketPage((page) => Math.max(1, page - 1))}
+                  disabled={ticketPage === 1}
+                  title="Previous page"
+                  aria-label="Previous page"
+                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-outline-variant bg-surface text-on-surface transition hover:border-primary-container disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <ChevronLeft size={18} />
+                </button>
+                <span className="min-w-20 text-center text-sm font-semibold text-on-surface">
+                  {ticketPage} / {totalTicketPages}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setTicketPage((page) => Math.min(totalTicketPages, page + 1))}
+                  disabled={ticketPage >= totalTicketPages}
+                  title="Next page"
+                  aria-label="Next page"
+                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-outline-variant bg-surface text-on-surface transition hover:border-primary-container disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <ChevronRight size={18} />
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-4">
             {STATUS_LANES.map((lane) => {
               const laneTickets = ticketsByStatus(lane.title)
@@ -583,7 +684,7 @@ export default function AgentPage() {
                       ))
                     ) : (
                       <div className="flex h-full min-h-48 items-center justify-center rounded-lg border border-dashed border-outline-variant p-6 text-center text-sm text-on-surface-variant">
-                        No tickets
+                          No tickets on this page
                       </div>
                     )}
                   </div>

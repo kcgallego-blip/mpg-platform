@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import Link from 'next/link'
 import {
@@ -23,10 +23,11 @@ import {
   Wrench,
   X,
 } from 'lucide-react'
-import { deleteOpenTicket, formatDate, getFive9LogoutIssues, getTickets, runTicketWorkflow } from '@/lib/db'
+import { deleteOpenTicket, formatDate, runTicketWorkflow } from '@/lib/db'
 import type { TicketWorkflowRequest } from '@/lib/db'
 import type { Database } from '@/lib/supabase'
 import { useAuthStore } from '@/lib/authStore'
+import { getClientCache, invalidateClientCache, setClientCache } from '@/lib/clientCache'
 import {
   formatAuditTimestamp,
   normalizeTicketStatus,
@@ -36,6 +37,18 @@ import {
 } from '@/lib/ticketAudit'
 
 type Ticket = Database['public']['Tables']['tickets']['Row']
+type TicketListItem = Pick<Ticket,
+  | 'ticketid'
+  | 'category'
+  | 'concern'
+  | 'date'
+  | 'start_time'
+  | 'name'
+  | 'status'
+  | 'team_leader'
+  | 'assisted_by'
+  | 'reported'
+>
 type Five9Logout = {
   id: string
   name: string | null
@@ -45,6 +58,19 @@ type Five9Logout = {
 }
 type ViewMode = 'it-issues' | 'five9-logouts'
 type StatusFilter = TicketStatus | 'All'
+type TicketPageResponse = {
+  tickets: TicketListItem[]
+  total: number
+  page: number
+  pageSize: number
+  statusCounts: Record<TicketStatus, number>
+}
+type Five9PageResponse = {
+  records: Five9Logout[]
+  total: number
+  page: number
+  pageSize: number
+}
 
 const IT_STAFF = [
   'Kevin Christopher Gallego',
@@ -59,6 +85,21 @@ const STATUS_TABS: Array<{ value: StatusFilter; icon: typeof CircleDot }> = [
   { value: 'All', icon: History },
 ]
 const PAGE_SIZE = 12
+const LIST_CACHE_TTL_MS = 2 * 60 * 1000
+const DETAIL_CACHE_TTL_MS = 5 * 60 * 1000
+
+const toTicketListItem = (ticket: Ticket): TicketListItem => ({
+  ticketid: ticket.ticketid,
+  category: ticket.category,
+  concern: ticket.concern,
+  date: ticket.date,
+  start_time: ticket.start_time,
+  name: ticket.name,
+  status: ticket.status,
+  team_leader: ticket.team_leader,
+  assisted_by: ticket.assisted_by,
+  reported: ticket.reported,
+})
 
 function formatTime(time: string | null): string {
   if (!time) return '—'
@@ -210,13 +251,17 @@ export default function ITReportsPage() {
     user?.role?.trim() && user.role.trim().toLowerCase() !== 'agent'
   )
   const [viewMode, setViewMode] = useState<ViewMode>('it-issues')
-  const [tickets, setTickets] = useState<Ticket[]>([])
+  const [tickets, setTickets] = useState<TicketListItem[]>([])
   const [five9Logouts, setFive9Logouts] = useState<Five9Logout[]>([])
   const [activeStatus, setActiveStatus] = useState<StatusFilter>('Open')
   const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
+  const [totalTickets, setTotalTickets] = useState(0)
+  const [totalFive9, setTotalFive9] = useState(0)
+  const [statusCounts, setStatusCounts] = useState<Record<TicketStatus, number>>({ Open: 0, Pending: 0, Solved: 0 })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null)
@@ -226,30 +271,73 @@ export default function ITReportsPage() {
   const [noteText, setNoteText] = useState('')
   const [workflowError, setWorkflowError] = useState<string | null>(null)
   const [savingAction, setSavingAction] = useState<TicketWorkflowRequest['action'] | 'delete' | null>(null)
+  const [detailLoadingTicketId, setDetailLoadingTicketId] = useState<number | null>(null)
 
-  const fetchTickets = useCallback(async () => {
+  const fetchTickets = useCallback(async (force = false) => {
+    if (!user?.email) return
+
     try {
       setLoading(true)
       setError(null)
-      setTickets(await getTickets())
+
+      const params = new URLSearchParams({
+        page: String(currentPage),
+        pageSize: String(PAGE_SIZE),
+        status: activeStatus,
+      })
+      if (dateFrom) params.set('dateFrom', dateFrom)
+      if (dateTo) params.set('dateTo', dateTo)
+      if (debouncedSearchQuery) params.set('search', debouncedSearchQuery)
+
+      const cachePrefix = `tickets:${user.email}:`
+      const cacheKey = `${cachePrefix}${params.toString()}`
+      if (force) invalidateClientCache(cachePrefix)
+      let data = force ? null : getClientCache<TicketPageResponse>(cacheKey)
+
+      if (!data) {
+        const response = await fetch(`/api/tickets?${params.toString()}`, { cache: 'no-store' })
+        data = await response.json() as TicketPageResponse
+        if (!response.ok) throw new Error((data as TicketPageResponse & { error?: string }).error || 'Failed to load tickets')
+        setClientCache(cacheKey, data, LIST_CACHE_TTL_MS)
+      }
+
+      setTickets(data.tickets || [])
+      setTotalTickets(data.total || 0)
+      setStatusCounts(data.statusCounts || { Open: 0, Pending: 0, Solved: 0 })
     } catch (fetchError: unknown) {
       setError(fetchError instanceof Error ? fetchError.message : 'Failed to load tickets')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [activeStatus, currentPage, dateFrom, dateTo, debouncedSearchQuery, user?.email])
 
-  const fetchFive9 = useCallback(async () => {
+  const fetchFive9 = useCallback(async (force = false) => {
+    if (!user?.email) return
+
     try {
       setLoading(true)
       setError(null)
-      setFive9Logouts(await getFive9LogoutIssues() as Five9Logout[])
+      const params = new URLSearchParams({ page: String(currentPage), pageSize: String(PAGE_SIZE) })
+      const cachePrefix = `five9:${user.email}:`
+      const cacheKey = `${cachePrefix}${params.toString()}`
+      if (force) invalidateClientCache(cachePrefix)
+      let data = force ? null : getClientCache<Five9PageResponse>(cacheKey)
+
+      if (!data) {
+        const response = await fetch(`/api/five9?${params.toString()}`, { cache: 'no-store' })
+        data = await response.json() as Five9PageResponse
+        if (!response.ok) throw new Error((data as Five9PageResponse & { error?: string }).error || 'Failed to load Five9 records')
+        setClientCache(cacheKey, data, LIST_CACHE_TTL_MS)
+      }
+
+      setFive9Logouts(data.records || [])
+      setTotalFive9(data.total || 0)
     } catch (fetchError: unknown) {
       setError(fetchError instanceof Error ? fetchError.message : 'Failed to load Five9 logout issues')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [currentPage, user?.email])
 
   useEffect(() => {
     if (!canManageTickets) {
@@ -259,43 +347,21 @@ export default function ITReportsPage() {
     void (viewMode === 'it-issues' ? fetchTickets() : fetchFive9())
   }, [canManageTickets, fetchFive9, fetchTickets, viewMode])
 
-  useEffect(() => setCurrentPage(1), [activeStatus, dateFrom, dateTo, searchQuery])
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setCurrentPage(1)
+      setDebouncedSearchQuery(searchQuery.trim())
+    }, 350)
+    return () => window.clearTimeout(timer)
+  }, [searchQuery])
 
-  const statusCounts = useMemo(() => {
-    const counts: Record<TicketStatus, number> = { Open: 0, Pending: 0, Solved: 0 }
-    tickets.forEach((ticket) => { counts[normalizeTicketStatus(ticket.status)] += 1 })
-    return counts
-  }, [tickets])
-
-  const filteredTickets = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase()
-    return tickets
-      .filter((ticket) => activeStatus === 'All' || normalizeTicketStatus(ticket.status) === activeStatus)
-      .filter((ticket) => !dateFrom || Boolean(ticket.date && ticket.date >= dateFrom))
-      .filter((ticket) => !dateTo || Boolean(ticket.date && ticket.date <= dateTo))
-      .filter((ticket) => !query || [
-        ticket.ticketid,
-        ticket.name,
-        ticket.team_leader,
-        ticket.category,
-        ticket.concern,
-        ticket.assisted_by,
-        ticket.troubleshooting,
-      ].some((value) => String(value ?? '').toLowerCase().includes(query)))
-      .sort((first, second) => {
-        const firstKey = `${first.date || ''}T${first.start_time || ''}`
-        const secondKey = `${second.date || ''}T${second.start_time || ''}`
-        return secondKey.localeCompare(firstKey) || second.ticketid - first.ticketid
-      })
-  }, [activeStatus, dateFrom, dateTo, searchQuery, tickets])
-
-  const totalPages = Math.max(1, Math.ceil(filteredTickets.length / PAGE_SIZE))
-  const paginatedTickets = filteredTickets.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
+  const activeTotal = viewMode === 'it-issues' ? totalTickets : totalFive9
+  const totalPages = Math.max(1, Math.ceil(activeTotal / PAGE_SIZE))
   useEffect(() => {
     if (currentPage > totalPages) setCurrentPage(totalPages)
   }, [currentPage, totalPages])
 
-  const openTicket = (ticket: Ticket) => {
+  const showTicketDetail = (ticket: Ticket) => {
     const assistant = ticket.assisted_by?.trim() || ''
     if (IT_STAFF.some((staff) => staff === assistant)) {
       setAssistantOption(assistant)
@@ -313,6 +379,31 @@ export default function ITReportsPage() {
     setWorkflowError(null)
   }
 
+  const openTicket = async (ticketId: number) => {
+    if (!user?.email) return
+
+    try {
+      setDetailLoadingTicketId(ticketId)
+      setError(null)
+      const cacheKey = `ticket-detail:${user.email}:${ticketId}`
+      let ticket = getClientCache<Ticket>(cacheKey)
+
+      if (!ticket) {
+        const response = await fetch(`/api/tickets/${ticketId}`, { cache: 'no-store' })
+        const payload = await response.json() as Ticket & { error?: string }
+        if (!response.ok) throw new Error(payload.error || 'Unable to load ticket details')
+        ticket = payload
+        setClientCache(cacheKey, ticket, DETAIL_CACHE_TTL_MS)
+      }
+
+      showTicketDetail(ticket)
+    } catch (detailError) {
+      setError(detailError instanceof Error ? detailError.message : 'Unable to load ticket details')
+    } finally {
+      setDetailLoadingTicketId(null)
+    }
+  }
+
   const assignedName = assistantOption === 'Others' ? customAssistant.trim() : assistantOption.trim()
 
   const notifyWebex = (ticket: Ticket, action: 'pending' | 'solve') => {
@@ -328,8 +419,12 @@ export default function ITReportsPage() {
       setSavingAction(request.action)
       setWorkflowError(null)
       const updated = await runTicketWorkflow(selectedTicket.ticketid, request)
-      setTickets((current) => current.map((ticket) => ticket.ticketid === updated.ticketid ? updated : ticket))
-      openTicket(updated)
+      setTickets((current) => current.map((ticket) => ticket.ticketid === updated.ticketid ? toTicketListItem(updated) : ticket))
+      showTicketDetail(updated)
+      if (user?.email) {
+        invalidateClientCache(`tickets:${user.email}:`)
+        setClientCache(`ticket-detail:${user.email}:${updated.ticketid}`, updated, DETAIL_CACHE_TTL_MS)
+      }
       if (request.action === 'add_note') setNoteText('')
       if (webexAction) notifyWebex(updated, webexAction)
     } catch (workflowFailure: unknown) {
@@ -375,6 +470,11 @@ export default function ITReportsPage() {
       setWorkflowError(null)
       await deleteOpenTicket(selectedTicket.ticketid)
       setTickets((current) => current.filter((ticket) => ticket.ticketid !== selectedTicket.ticketid))
+      setTotalTickets((current) => Math.max(0, current - 1))
+      if (user?.email) {
+        invalidateClientCache(`tickets:${user.email}:`)
+        invalidateClientCache(`ticket-detail:${user.email}:${selectedTicket.ticketid}`)
+      }
       setSelectedTicket(null)
     } catch (deleteFailure: unknown) {
       setWorkflowError(deleteFailure instanceof Error ? deleteFailure.message : 'Unable to delete this ticket')
@@ -417,7 +517,10 @@ export default function ITReportsPage() {
               <button
                 key={mode}
                 type="button"
-                onClick={() => setViewMode(mode)}
+                onClick={() => {
+                  setCurrentPage(1)
+                  setViewMode(mode)
+                }}
                 className={`rounded-md px-3 py-2 text-sm font-medium ${viewMode === mode ? 'bg-primary text-on-primary' : 'text-on-surface-variant hover:text-on-surface'}`}
               >
                 {mode === 'it-issues' ? 'IT Issues' : 'Five9 Logouts'}
@@ -426,7 +529,7 @@ export default function ITReportsPage() {
           </div>
           <button
             type="button"
-            onClick={() => void (viewMode === 'it-issues' ? fetchTickets() : fetchFive9())}
+            onClick={() => void (viewMode === 'it-issues' ? fetchTickets(true) : fetchFive9(true))}
             disabled={loading}
             className="inline-flex items-center gap-2 rounded-lg border border-outline-variant/40 px-3 py-2 text-sm font-medium text-on-surface disabled:opacity-50"
           >
@@ -442,12 +545,14 @@ export default function ITReportsPage() {
         <>
           <nav aria-label="Ticket status" className="grid grid-cols-2 gap-2 rounded-xl bg-surface-container-low/60 p-2 sm:grid-cols-4">
             {STATUS_TABS.map(({ value, icon: Icon }) => {
-              const count = value === 'All' ? tickets.length : statusCounts[value]
+              const count = value === 'All'
+                ? statusCounts.Open + statusCounts.Pending + statusCounts.Solved
+                : statusCounts[value]
               return (
                 <button
                   key={value}
                   type="button"
-                  onClick={() => setActiveStatus(value)}
+                  onClick={() => { setCurrentPage(1); setActiveStatus(value) }}
                   className={`flex items-center justify-center gap-2 rounded-lg px-3 py-3 text-sm font-semibold ${activeStatus === value ? 'bg-surface text-primary shadow-sm' : 'text-on-surface-variant hover:bg-surface/60'}`}
                 >
                   <Icon size={17} /> {value}
@@ -475,13 +580,13 @@ export default function ITReportsPage() {
                   <input
                     type="date"
                     value={field.value}
-                    onChange={(event) => field.setter(event.target.value)}
+                    onChange={(event) => { setCurrentPage(1); field.setter(event.target.value) }}
                     className="rounded-lg border border-outline-variant/40 bg-surface py-2.5 pl-9 pr-3 text-sm text-on-surface outline-none focus:border-primary"
                   />
                 </label>
               ))}
               {(searchQuery || dateFrom || dateTo) && (
-                <button type="button" onClick={() => { setSearchQuery(''); setDateFrom(''); setDateTo('') }} className="inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm text-on-surface-variant hover:bg-surface-container-high">
+                <button type="button" onClick={() => { setCurrentPage(1); setSearchQuery(''); setDateFrom(''); setDateTo('') }} className="inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm text-on-surface-variant hover:bg-surface-container-high">
                   <X size={17} /> Clear
                 </button>
               )}
@@ -495,7 +600,7 @@ export default function ITReportsPage() {
       {loading ? (
         <div className="flex items-center justify-center gap-3 py-20 text-on-surface-variant"><Loader2 size={28} className="animate-spin text-primary" />Loading records...</div>
       ) : viewMode === 'it-issues' ? (
-        filteredTickets.length === 0 ? (
+        tickets.length === 0 ? (
           <div className="rounded-xl border border-dashed border-outline-variant/50 py-20 text-center text-on-surface-variant">No tickets match these filters.</div>
         ) : (
           <>
@@ -507,15 +612,15 @@ export default function ITReportsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-outline-variant/15 bg-surface">
-                  {paginatedTickets.map((ticket) => (
+                  {tickets.map((ticket) => (
                     <tr
                       key={ticket.ticketid}
                       tabIndex={0}
                       role="button"
                       aria-label={`Open ticket ${ticket.ticketid}`}
-                      onClick={() => openTicket(ticket)}
-                      onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') openTicket(ticket) }}
-                      className="cursor-pointer hover:bg-surface-container-low/60 focus:outline-none"
+                      onClick={() => void openTicket(ticket.ticketid)}
+                      onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') void openTicket(ticket.ticketid) }}
+                      className={`cursor-pointer hover:bg-surface-container-low/60 focus:outline-none ${detailLoadingTicketId === ticket.ticketid ? 'opacity-60' : ''}`}
                     >
                       <td className="px-4 py-4"><StatusBadge status={ticket.status} /></td>
                       <td className="whitespace-nowrap px-4 py-4 text-sm text-on-surface">{ticket.date ? formatDate(ticket.date) : '—'}<p className="font-mono text-xs text-on-surface-variant">{formatTime(ticket.start_time)}</p></td>
@@ -534,8 +639,8 @@ export default function ITReportsPage() {
               </table>
             </div>
             <div className="space-y-3 md:hidden">
-              {paginatedTickets.map((ticket) => (
-                <button key={ticket.ticketid} type="button" onClick={() => openTicket(ticket)} className="w-full rounded-xl border border-outline-variant/25 bg-surface p-4 text-left">
+              {tickets.map((ticket) => (
+                <button key={ticket.ticketid} type="button" onClick={() => void openTicket(ticket.ticketid)} disabled={detailLoadingTicketId === ticket.ticketid} className="w-full rounded-xl border border-outline-variant/25 bg-surface p-4 text-left disabled:opacity-60">
                   <div className="flex items-start justify-between gap-3"><div><p className="font-hanken font-semibold text-on-surface">{ticket.category || 'Uncategorized'}</p><p className="text-xs text-on-surface-variant">Ticket #{ticket.ticketid}</p></div><div className="flex flex-wrap justify-end gap-1.5">{ticket.reported && <span className="inline-flex rounded-full bg-success/15 px-2.5 py-1 text-xs font-semibold text-success">Reported</span>}<StatusBadge status={ticket.status} /></div></div>
                   <p className="mt-3 line-clamp-2 text-sm text-on-surface">{ticket.concern || 'No concern provided'}</p>
                   <div className="mt-3 flex justify-between gap-3 text-xs text-on-surface-variant"><span>{ticket.name || 'Unknown reporter'}</span><span>{ticket.date ? formatDate(ticket.date) : '—'} · {formatTime(ticket.start_time)}</span></div>
@@ -544,7 +649,7 @@ export default function ITReportsPage() {
             </div>
             {totalPages > 1 && (
               <div className="flex items-center justify-between gap-4">
-                <p className="text-sm text-on-surface-variant">{(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, filteredTickets.length)} of {filteredTickets.length}</p>
+                <p className="text-sm text-on-surface-variant">{(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, totalTickets)} of {totalTickets}</p>
                 <div className="flex items-center gap-2">
                   <button type="button" onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} disabled={currentPage === 1} aria-label="Previous page" className="rounded-lg border border-outline-variant/30 p-2 disabled:opacity-40"><ChevronLeft size={18} /></button>
                   <span className="text-sm">Page {currentPage} of {totalPages}</span>
@@ -557,13 +662,25 @@ export default function ITReportsPage() {
       ) : five9Logouts.length === 0 ? (
         <div className="rounded-xl border border-dashed border-outline-variant/50 py-20 text-center text-on-surface-variant">No Five9 logout records found.</div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-outline-variant/25">
-          <table className="w-full">
-            <thead className="bg-surface-container-low"><tr className="text-left text-xs font-semibold uppercase tracking-wide text-on-surface-variant">{['Date', 'Name', 'Logout time', 'Login time'].map((heading) => <th key={heading} className="px-4 py-3">{heading}</th>)}</tr></thead>
-            <tbody className="divide-y divide-outline-variant/15 bg-surface">
-              {five9Logouts.map((logout) => <tr key={logout.id}><td className="px-4 py-4 text-sm">{formatDate(logout.created_at)}</td><td className="px-4 py-4 text-sm">{logout.name || 'Unknown'}</td><td className="px-4 py-4 font-mono text-sm">{formatTime(logout.start_time)}</td><td className="px-4 py-4 font-mono text-sm">{formatTime(logout.end_time)}</td></tr>)}
-            </tbody>
-          </table>
+        <div className="space-y-3">
+          <div className="overflow-x-auto rounded-xl border border-outline-variant/25">
+            <table className="w-full">
+              <thead className="bg-surface-container-low"><tr className="text-left text-xs font-semibold uppercase tracking-wide text-on-surface-variant">{['Date', 'Name', 'Logout time', 'Login time'].map((heading) => <th key={heading} className="px-4 py-3">{heading}</th>)}</tr></thead>
+              <tbody className="divide-y divide-outline-variant/15 bg-surface">
+                {five9Logouts.map((logout) => <tr key={logout.id}><td className="px-4 py-4 text-sm">{formatDate(logout.created_at)}</td><td className="px-4 py-4 text-sm">{logout.name || 'Unknown'}</td><td className="px-4 py-4 font-mono text-sm">{formatTime(logout.start_time)}</td><td className="px-4 py-4 font-mono text-sm">{formatTime(logout.end_time)}</td></tr>)}
+              </tbody>
+            </table>
+          </div>
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between gap-4">
+              <p className="text-sm text-on-surface-variant">{(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, totalFive9)} of {totalFive9}</p>
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} disabled={currentPage === 1} aria-label="Previous page" className="rounded-lg border border-outline-variant/30 p-2 disabled:opacity-40"><ChevronLeft size={18} /></button>
+                <span className="text-sm">Page {currentPage} of {totalPages}</span>
+                <button type="button" onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))} disabled={currentPage === totalPages} aria-label="Next page" className="rounded-lg border border-outline-variant/30 p-2 disabled:opacity-40"><ChevronRight size={18} /></button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

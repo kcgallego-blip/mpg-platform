@@ -1,12 +1,21 @@
-import { supabase } from '@/lib/supabase'
+import { TICKET_DETAIL_COLUMNS } from '@/lib/dbColumns'
 import { getAuthenticatedDbUser } from '@/lib/sessionAuth'
+import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import { NextRequest, NextResponse } from 'next/server'
 
 export async function GET(
-  request: Request,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const user = await getAuthenticatedDbUser(request)
+    if (!user?.is_active) {
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 })
+    }
+    if (!user.role?.trim() || user.role.trim().toLowerCase() === 'agent') {
+      return NextResponse.json({ error: 'Ticket management access denied' }, { status: 403 })
+    }
+
     const resolvedParams = await params
     const ticketId = resolvedParams.id
 
@@ -17,9 +26,9 @@ export async function GET(
       )
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('tickets')
-      .select('*')
+      .select(TICKET_DETAIL_COLUMNS)
       .eq('ticketid', parseInt(ticketId))
       .single()
 
@@ -80,11 +89,11 @@ export async function PATCH(
       )
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('tickets')
       .update(updateData)
       .eq('ticketid', parseInt(ticketId))
-      .select()
+      .select(TICKET_DETAIL_COLUMNS)
       .single()
 
     if (error) {
@@ -136,11 +145,11 @@ export async function POST(
     }
 
     // Update the ticket with the webex_message_id
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('tickets')
       .update({ webex_message_id })
       .eq('ticketid', parseInt(ticketId))
-      .select()
+      .select('ticketid, webex_message_id')
       .single()
 
     if (error) {

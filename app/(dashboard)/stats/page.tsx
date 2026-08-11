@@ -3,11 +3,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAuthStore } from '@/lib/authStore'
 import { useRouter } from 'next/navigation'
+import { getClientCache, setClientCache } from '@/lib/clientCache'
+import { canUploadStats } from '@/lib/statsAccess'
 import {
   Loader2,
   Search,
   ChevronUp,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   AlertCircle,
   Upload,
 } from 'lucide-react'
@@ -54,6 +58,22 @@ type SortConfig = {
   field: string
   order: 'asc' | 'desc'
 }
+
+type StatsResponse = {
+  stats: Stat[]
+  supervisors: string[]
+  range: number
+  userRole: string
+  periodType: 'weekly' | 'monthly'
+  periodValue: number
+  availablePeriods: number[]
+  total: number
+  page: number
+  pageSize: number
+}
+
+const STATS_CACHE_TTL_MS = 10 * 60 * 1000
+const STATS_PAGE_SIZE = 50
 
 const DISPLAY_COLUMNS = [
   'name',
@@ -145,6 +165,9 @@ export default function StatsPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('')
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalStatsRows, setTotalStatsRows] = useState(0)
   const [selectedSupervisor, setSelectedSupervisor] = useState('all')
   const [supervisors, setSupervisors] = useState<string[]>([])
   const [sortConfig, setSortConfig] = useState<SortConfig>({ field: 'name', order: 'asc' })
@@ -189,20 +212,30 @@ export default function StatsPage() {
         sortOrder: sortConfig.order,
         periodType,
         period: String(periodType === 'monthly' ? selectedMonth : selectedWeek),
+        search: debouncedSearchQuery,
+        page: String(currentPage),
+        pageSize: String(STATS_PAGE_SIZE),
       })
 
-      const response = await fetch(`/api/stats?${queryParams}`)
+      const cacheKey = `stats:v2:${user.email}:${queryParams.toString()}`
+      let data = getClientCache<StatsResponse>(cacheKey)
 
-      if (!response.ok) {
-        if (response.status === 401) {
-          router.push('/login')
-          return
+      if (!data) {
+        const response = await fetch(`/api/stats?${queryParams}`, { cache: 'no-store' })
+
+        if (!response.ok) {
+          if (response.status === 401) {
+            router.push('/login')
+            return
+          }
+          throw new Error('Failed to fetch stats')
         }
-        throw new Error('Failed to fetch stats')
-      }
 
-      const data = await response.json()
+        data = await response.json() as StatsResponse
+        setClientCache(cacheKey, data, STATS_CACHE_TTL_MS)
+      }
       setStats(data.stats || [])
+      setTotalStatsRows(data.total || 0)
       setSupervisors(data.supervisors || [])
       setDisplayedRange(data.range || getStatsWeekRange())
       setUserRole(data.userRole)
@@ -232,11 +265,20 @@ export default function StatsPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [user?.email, selectedSupervisor, sortConfig, periodType, selectedMonth, selectedWeek, router])
+  }, [user?.email, selectedSupervisor, sortConfig, periodType, selectedMonth, selectedWeek, debouncedSearchQuery, currentPage, router])
 
   useEffect(() => {
     loadStats()
   }, [loadStats])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setCurrentPage(1)
+      setDebouncedSearchQuery(searchQuery.trim())
+    }, 350)
+
+    return () => window.clearTimeout(timer)
+  }, [searchQuery])
 
   useEffect(() => {
     if (periodType === 'weekly' && periodOptions.length > 0) {
@@ -248,21 +290,14 @@ export default function StatsPage() {
   }, [periodType, periodOptions, selectedWeek])
 
   const handleSort = (field: string) => {
+    setCurrentPage(1)
     setSortConfig(prevConfig => ({
       field,
       order: prevConfig.field === field && prevConfig.order === 'asc' ? 'desc' : 'asc',
     }))
   }
 
-  // Client-side filtering based on search query
-  const filteredStats = useMemo(() => {
-    if (!searchQuery.trim()) return stats
-    const query = searchQuery.toLowerCase()
-    return stats.filter(stat =>
-      stat.name.toLowerCase().includes(query) ||
-      stat.supervisor?.toLowerCase().includes(query)
-    )
-  }, [stats, searchQuery])
+  const totalStatsPages = Math.max(1, Math.ceil(totalStatsRows / STATS_PAGE_SIZE))
 
   const getScoreColor = (fieldName: string, value: string | number | null | undefined) => {
     if (isNAField(fieldName)) return ''
@@ -386,23 +421,20 @@ export default function StatsPage() {
           <div className="inline-flex rounded-full border border-outline-variant bg-surface p-1">
             <button
               type="button"
-              onClick={() => setPeriodType('weekly')}
+              onClick={() => { setCurrentPage(1); setPeriodType('weekly') }}
               className={`rounded-full px-4 py-2 text-sm font-semibold transition ${periodType === 'weekly' ? 'bg-primary-container text-on-primary-container' : 'text-on-surface-variant'}`}
             >
               Weekly
             </button>
             <button
               type="button"
-              onClick={() => setPeriodType('monthly')}
+              onClick={() => { setCurrentPage(1); setPeriodType('monthly') }}
               className={`rounded-full px-4 py-2 text-sm font-semibold transition ${periodType === 'monthly' ? 'bg-primary-container text-on-primary-container' : 'text-on-surface-variant'}`}
             >
               Monthly
             </button>
           </div>
-          {(userRole?.toLowerCase() === 'team leader' ||
-            userRole?.toLowerCase() === 'supervisor' ||
-            userRole?.toLowerCase() === 'admin' ||
-            userRole?.toLowerCase() === 'manager') && (
+          {canUploadStats(userRole) && (
             <button
               onClick={() => router.push('/stats/upload')}
               className="flex items-center gap-2 rounded-lg bg-primary-container px-6 py-2.5 font-medium text-on-primary-container transition hover:opacity-90 whitespace-nowrap"
@@ -455,7 +487,7 @@ export default function StatsPage() {
                 <select
                   id="supervisor"
                   value={selectedSupervisor}
-                  onChange={e => setSelectedSupervisor(e.target.value)}
+                  onChange={e => { setCurrentPage(1); setSelectedSupervisor(e.target.value) }}
                   className="w-full rounded-lg border border-outline bg-surface px-4 py-2.5 text-on-surface outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
                 >
                   <option value="all">All Team Leaders</option>
@@ -482,7 +514,7 @@ export default function StatsPage() {
                 <select
                   id="statsPeriod"
                   value={selectedMonth}
-                  onChange={e => setSelectedMonth(Number(e.target.value))}
+                  onChange={e => { setCurrentPage(1); setSelectedMonth(Number(e.target.value)) }}
                   className="w-full rounded-lg border border-outline bg-surface px-4 py-2.5 text-on-surface outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
                 >
                   {periodOptions.map(month => (
@@ -501,6 +533,7 @@ export default function StatsPage() {
                   onChange={e => {
                     const week = Number(e.target.value)
                     const validWeek = Math.max(1, Math.min(week, periodOptions.length > 0 ? Math.max(...periodOptions) : week))
+                    setCurrentPage(1)
                     setSelectedWeek(validWeek)
                   }}
                   className="w-full rounded-lg border border-outline bg-surface px-4 py-2.5 text-on-surface outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
@@ -546,7 +579,7 @@ export default function StatsPage() {
                 <select
                   id="agentStatsPeriod"
                   value={selectedMonth}
-                  onChange={e => setSelectedMonth(Number(e.target.value))}
+                  onChange={e => { setCurrentPage(1); setSelectedMonth(Number(e.target.value)) }}
                   className="w-full rounded-lg border border-outline bg-surface px-3 py-2.5 text-sm font-semibold text-on-surface outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
                 >
                   {periodOptions.map(month => (
@@ -559,7 +592,7 @@ export default function StatsPage() {
                 <select
                   id="agentStatsPeriod"
                   value={selectedWeek}
-                  onChange={e => setSelectedWeek(Number(e.target.value))}
+                  onChange={e => { setCurrentPage(1); setSelectedWeek(Number(e.target.value)) }}
                   className="w-full rounded-lg border border-outline bg-surface px-3 py-2.5 text-sm font-semibold text-on-surface outline-none transition focus:border-primary focus:ring-1 focus:ring-primary"
                 >
                   {periodOptions.map(week => (
@@ -733,13 +766,6 @@ export default function StatsPage() {
             {searchQuery ? `No agents found matching "${searchQuery}" for ${periodType === 'monthly' ? 'the selected month' : `Week ${selectedWeek}`} (${displayedDateRange}).` : `No stats available for ${periodType === 'monthly' ? 'the selected month' : `Week ${selectedWeek}`} (${displayedDateRange}).`}
           </p>
         </div>
-      ) : filteredStats.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-lg border border-outline-variant/60 bg-surface/70 py-16">
-          <AlertCircle size={40} className="mb-4 text-on-surface-variant/40" />
-          <p className="text-on-surface-variant">
-            No agents found matching "{searchQuery}" for {periodType === 'monthly' ? 'the selected month' : `Week ${selectedWeek}`}.
-          </p>
-        </div>
       ) : (
         <>
           <div className="mb-3 rounded-lg border border-outline-variant/60 bg-surface-dim p-4 text-sm text-on-surface-variant">
@@ -753,7 +779,7 @@ export default function StatsPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredStats.map((stat, idx) => (
+              {stats.map((stat, idx) => (
                 <tr
                   key={stat.id}
                   className={`border-b border-outline-variant/30 transition hover:bg-surface-dim ${
@@ -769,6 +795,22 @@ export default function StatsPage() {
             </tbody>
           </table>
           </div>
+          {totalStatsPages > 1 && (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-outline-variant/60 pt-4">
+              <p className="text-sm text-on-surface-variant">
+                Showing {(currentPage - 1) * STATS_PAGE_SIZE + 1}-{Math.min(currentPage * STATS_PAGE_SIZE, totalStatsRows)} of {totalStatsRows}
+              </p>
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={() => setCurrentPage(page => Math.max(1, page - 1))} disabled={currentPage === 1} className="flex h-9 w-9 items-center justify-center rounded-lg border border-outline-variant bg-surface disabled:opacity-40" aria-label="Previous page" title="Previous page">
+                  <ChevronLeft size={18} />
+                </button>
+                <span className="min-w-20 text-center text-sm font-semibold">{currentPage} / {totalStatsPages}</span>
+                <button type="button" onClick={() => setCurrentPage(page => Math.min(totalStatsPages, page + 1))} disabled={currentPage >= totalStatsPages} className="flex h-9 w-9 items-center justify-center rounded-lg border border-outline-variant bg-surface disabled:opacity-40" aria-label="Next page" title="Next page">
+                  <ChevronRight size={18} />
+                </button>
+              </div>
+            </div>
+          )}
         </>
       )}
 

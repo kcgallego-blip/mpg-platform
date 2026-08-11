@@ -1,5 +1,6 @@
-import { NextResponse } from 'next/server'
-import { supabase } from '@/lib/supabase'
+import { NextRequest, NextResponse } from 'next/server'
+import { getAuthenticatedDbUser } from '@/lib/sessionAuth'
+import { supabaseAdmin } from '@/lib/supabaseAdmin'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,23 +19,22 @@ type ScheduleAgent = {
   present: boolean | null
 }
 
-const normalizeName = (value: string | null | undefined) =>
-  (value || '')
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9]+/g, '')
-    .trim()
-
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url)
-    const teamLeader = searchParams.get('teamLeader')?.trim()
+    const user = await getAuthenticatedDbUser(request)
+    if (!user?.is_active) {
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 })
+    }
 
-    const { data, error } = await supabase
+    const role = user.role?.trim().toLowerCase() || ''
+    const teamLeader = ['team leader', 'supervisor'].includes(role) ? user.name?.trim() : null
+    let query = supabaseAdmin
       .from('agents')
-      .select('name, team_leader, role, off_1, off_2, start_shift, end_shift, comments, present')
+      .select('name, team_leader, role, off_1, off_2, start_shift, end_shift, present')
       .order('name', { ascending: true })
+
+    if (teamLeader) query = query.ilike('team_leader', teamLeader)
+    const { data, error } = await query
 
     if (error) throw error
 
@@ -46,15 +46,10 @@ export async function GET(request: Request) {
       off_2: string | null
       start_shift: string | null
       end_shift: string | null
-      comments: string | null
       present: boolean | null
     }>
 
-    const filteredAgents = teamLeader
-      ? allAgents.filter((agent) => normalizeName(agent.team_leader) === normalizeName(teamLeader))
-      : allAgents
-
-    const agents: ScheduleAgent[] = (filteredAgents.length > 0 ? filteredAgents : allAgents).map((agent) => ({
+    const agents: ScheduleAgent[] = allAgents.map((agent) => ({
       id: agent.name,
       name: agent.name,
       role: agent.role || '',
@@ -86,8 +81,16 @@ export async function GET(request: Request) {
   }
 }
 
-export async function PATCH(request: Request) {
+export async function PATCH(request: NextRequest) {
   try {
+    const user = await getAuthenticatedDbUser(request)
+    if (!user?.is_active) {
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 })
+    }
+    if (!user.role?.trim() || user.role.trim().toLowerCase() === 'agent') {
+      return NextResponse.json({ error: 'Staffing update access denied' }, { status: 403 })
+    }
+
     const payload = await request.json()
     const agentName = typeof payload?.agentName === 'string' ? payload.agentName.trim() : ''
     const present = typeof payload?.present === 'boolean' ? payload.present : null
@@ -96,7 +99,7 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: 'Agent name is required' }, { status: 400 })
     }
 
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('agents')
       .update({ present })
       .eq('name', agentName)

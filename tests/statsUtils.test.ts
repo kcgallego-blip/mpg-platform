@@ -1,6 +1,28 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { getStatsWeekOptions } from '../lib/statsUtils.ts'
+import { canUploadStats } from '../lib/statsAccess.ts'
+import { getStatsMonthOptions, getStatsWeekOptions } from '../lib/statsUtils.ts'
+
+test('stats month options include every month through the current month', () => {
+  assert.deepEqual(
+    getStatsMonthOptions(new Date(2026, 7, 12)),
+    [1, 2, 3, 4, 5, 6, 7, 8]
+  )
+  assert.deepEqual(
+    getStatsMonthOptions(new Date(2026, 8, 1)),
+    [1, 2, 3, 4, 5, 6, 7, 8, 9]
+  )
+})
+
+test('stats upload RBAC includes current and legacy management roles', () => {
+  for (const role of ['Admin', 'Team Leader', 'Operations Manager', 'Manager', 'Supervisor']) {
+    assert.equal(canUploadStats(role), true, role)
+  }
+
+  for (const role of ['Agent', 'IT', null, undefined]) {
+    assert.equal(canUploadStats(role), false, String(role))
+  }
+})
 
 test('includes a loaded week ahead of the browser calendar week', () => {
   assert.deepEqual(getStatsWeekOptions(29, [30]), [30, 29, 28, 27, 26, 25, 24, 23])

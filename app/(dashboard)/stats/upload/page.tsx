@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAuthStore } from '@/lib/authStore'
+import { invalidateClientCache } from '@/lib/clientCache'
+import { canUploadStats } from '@/lib/statsAccess'
 import {
   formatStatsDate,
   getStatsMonthOptions,
@@ -81,28 +83,7 @@ export default function StatsUploadPage() {
   )
 
   // Check authorization
-  const userRole = user?.role?.toLowerCase()
-  const isAuthorized =
-    userRole === 'admin' ||
-    userRole === 'manager' ||
-    userRole === 'team leader' ||
-    userRole === 'supervisor'
-
-  if (!isAuthorized) {
-    return (
-      <div className="space-y-6 pb-8">
-        <div className="flex gap-3 rounded-lg border border-error/30 bg-error/10 p-4">
-          <AlertCircle size={20} className="mt-0.5 flex-shrink-0 text-error" />
-          <div>
-            <p className="font-medium text-error">Access Denied</p>
-            <p className="text-sm text-error/80">
-              Only Team Leaders, Supervisors, Managers, and Admins can upload stats data.
-            </p>
-          </div>
-        </div>
-      </div>
-    )
-  }
+  const isAuthorized = canUploadStats(user?.role)
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault()
@@ -197,6 +178,7 @@ export default function StatsUploadPage() {
         failed: failedCount,
         message: result.message,
       })
+      invalidateClientCache('stats:')
       showNotification('success', 'Upload complete', result.message, detailText)
       setFile(null)
     } catch (err: any) {
@@ -206,6 +188,22 @@ export default function StatsUploadPage() {
       setIsLoading(false)
     }
   }, [file, periodType, selectedMonth, selectedWeek, selectedRange, showNotification])
+
+  if (!isAuthorized) {
+    return (
+      <div className="space-y-6 pb-8">
+        <div className="flex gap-3 rounded-lg border border-error/30 bg-error/10 p-4">
+          <AlertCircle size={20} className="mt-0.5 flex-shrink-0 text-error" />
+          <div>
+            <p className="font-medium text-error">Access Denied</p>
+            <p className="text-sm text-error/80">
+              Only Team Leaders, Supervisors, Operations Managers, Managers, and Admins can upload stats data.
+            </p>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6 pb-8">

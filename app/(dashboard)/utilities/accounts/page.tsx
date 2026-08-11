@@ -4,9 +4,9 @@ import { useState, useEffect, useMemo } from 'react'
 import { Search, User, Mail, Shield, Clock, CheckCircle, XCircle, RefreshCw, ChevronDown, Pencil } from 'lucide-react'
 import { useAuthStore } from '@/lib/authStore'
 import { getUsers, updateUserStatus, updateUserRole, updateUserName } from '@/lib/db'
-import type { Database } from '@/lib/supabase'
+import type { AccountUser } from '@/lib/db'
 
-type UserRow = Database['public']['Tables']['users']['Row']
+type UserRow = AccountUser
 
 const ROLE_OPTIONS = ['Admin', 'Team Leader', 'Operations Manager', 'IT']
 

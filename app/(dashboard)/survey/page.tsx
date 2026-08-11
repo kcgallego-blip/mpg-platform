@@ -9,11 +9,13 @@ import {
   ChevronRight,
   FileText,
   Loader2,
+  RefreshCw,
   Search,
   Upload,
   X,
 } from 'lucide-react'
 import { useRequireAuth } from '@/lib/useRequireAuth'
+import { getClientCache, invalidateClientCache, setClientCache } from '@/lib/clientCache'
 
 type SurveyRow = {
   survey_date: string | null
@@ -43,6 +45,19 @@ const CSAT_GROUPS = [
   { value: 'Satisfied' as const, title: 'Satisfied', emoji: '😊', accent: 'border-emerald-200 bg-emerald-50/70' },
 ]
 const TABLE_PAGE_SIZE = 50
+const SURVEY_CACHE_TTL_MS = 10 * 60 * 1000
+
+type SurveyResponse = {
+  survey: SurveyRow[]
+  total: number
+  page: number
+  pageSize: number
+  userRole: string
+  userName: string
+  periodType: 'weekly' | 'monthly'
+  periodValue: string
+  periodOptions: { weekly: PeriodOption[]; monthly: PeriodOption[] }
+}
 
 const formatSurveyDate = (value: string | null) => {
   if (!value) return 'No date'
@@ -165,6 +180,7 @@ export default function SurveyPage() {
   const [file, setFile] = useState<File | null>(null)
   const [isDragActive, setIsDragActive] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('')
   const [userRole, setUserRole] = useState<string | null>(null)
   const [periodType, setPeriodType] = useState<'weekly' | 'monthly'>('weekly')
   const [selectedPeriod, setSelectedPeriod] = useState('')
@@ -173,6 +189,7 @@ export default function SurveyPage() {
     monthly: PeriodOption[]
   }>({ weekly: [], monthly: [] })
   const [tablePage, setTablePage] = useState(1)
+  const [totalSurveyRows, setTotalSurveyRows] = useState(0)
 
   const isAgentView = userRole?.toLowerCase() === 'agent'
   const canUpload = ['admin', 'manager', 'operations manager', 'team leader', 'supervisor'].includes(userRole?.toLowerCase() || '')
@@ -181,29 +198,55 @@ export default function SurveyPage() {
     setNotification({ type, title, message, details })
   }, [])
 
-  const loadSurvey = useCallback(async () => {
+  const loadSurvey = useCallback(async (force = false) => {
+    if (!user?.email) return
+
     try {
       setIsLoading(true)
       setError('')
 
-      const queryParams = new URLSearchParams({ periodType })
+      const queryParams = new URLSearchParams({
+        periodType,
+        page: String(tablePage),
+        pageSize: String(TABLE_PAGE_SIZE),
+      })
       if (selectedPeriod) {
         queryParams.set('period', selectedPeriod)
       }
-
-      const response = await fetch(`/api/survey?${queryParams}`)
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          router.push('/login')
-          return
-        }
-        const data = await response.json().catch(() => ({}))
-        throw new Error(data.error || 'Failed to fetch survey data')
+      if (debouncedSearchQuery) {
+        queryParams.set('search', debouncedSearchQuery)
       }
 
-      const data = await response.json()
+      const cachePrefix = `survey:${user.email}:`
+      const cacheKey = `${cachePrefix}${queryParams.toString()}`
+      if (force) invalidateClientCache(cachePrefix)
+
+      let data = force ? null : getClientCache<SurveyResponse>(cacheKey)
+
+      if (!data) {
+        const response = await fetch(`/api/survey?${queryParams}`, { cache: 'no-store' })
+
+        if (!response.ok) {
+          if (response.status === 401) {
+            router.push('/login')
+            return
+          }
+          const errorData = await response.json().catch(() => ({}))
+          throw new Error(errorData.error || 'Failed to fetch survey data')
+        }
+
+        data = await response.json() as SurveyResponse
+        setClientCache(cacheKey, data, SURVEY_CACHE_TTL_MS)
+
+        if (data.periodValue && data.periodValue !== selectedPeriod) {
+          const resolvedParams = new URLSearchParams(queryParams)
+          resolvedParams.set('period', data.periodValue)
+          setClientCache(`${cachePrefix}${resolvedParams.toString()}`, data, SURVEY_CACHE_TTL_MS)
+        }
+      }
+
       setSurvey(data.survey || [])
+      setTotalSurveyRows(data.total || 0)
       setUserRole(data.userRole)
       setPeriodOptions(data.periodOptions || { weekly: [], monthly: [] })
       if (data.periodType === 'monthly' || data.periodType === 'weekly') {
@@ -218,11 +261,11 @@ export default function SurveyPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [periodType, selectedPeriod, router])
+  }, [debouncedSearchQuery, periodType, router, selectedPeriod, tablePage, user?.email])
 
   useEffect(() => {
     if (isReady && user) {
-      loadSurvey()
+      void loadSurvey()
     }
   }, [isReady, user, loadSurvey])
 
@@ -234,21 +277,12 @@ export default function SurveyPage() {
   }, [notification])
 
   useEffect(() => {
-    setTablePage(1)
+    const timer = window.setTimeout(() => {
+      setTablePage(1)
+      setDebouncedSearchQuery(searchQuery.trim())
+    }, 350)
+    return () => window.clearTimeout(timer)
   }, [searchQuery])
-
-  const filteredSurvey = useMemo(() => {
-    if (!searchQuery.trim()) return survey
-    const query = searchQuery.toLowerCase()
-
-    return survey.filter(row =>
-      row.response_id.toLowerCase().includes(query) ||
-      row.agent.toLowerCase().includes(query) ||
-      row.csat.toLowerCase().includes(query) ||
-      (row.mod_comment || '').toLowerCase().includes(query) ||
-      (row.open_comment || '').toLowerCase().includes(query)
-    )
-  }, [survey, searchQuery])
 
   const groupedSurvey = useMemo(() => {
     return CSAT_GROUPS.map(group => ({
@@ -257,14 +291,10 @@ export default function SurveyPage() {
     }))
   }, [survey])
 
-  const totalTablePages = Math.max(1, Math.ceil(filteredSurvey.length / TABLE_PAGE_SIZE))
+  const totalTablePages = Math.max(1, Math.ceil(totalSurveyRows / TABLE_PAGE_SIZE))
   const safeTablePage = Math.min(tablePage, totalTablePages)
-  const paginatedSurvey = filteredSurvey.slice(
-    (safeTablePage - 1) * TABLE_PAGE_SIZE,
-    safeTablePage * TABLE_PAGE_SIZE
-  )
-  const firstTableRow = filteredSurvey.length === 0 ? 0 : (safeTablePage - 1) * TABLE_PAGE_SIZE + 1
-  const lastTableRow = Math.min(safeTablePage * TABLE_PAGE_SIZE, filteredSurvey.length)
+  const firstTableRow = totalSurveyRows === 0 ? 0 : (safeTablePage - 1) * TABLE_PAGE_SIZE + 1
+  const lastTableRow = Math.min(safeTablePage * TABLE_PAGE_SIZE, totalSurveyRows)
 
   const activePeriodOptions = periodType === 'monthly'
     ? periodOptions.monthly
@@ -346,7 +376,7 @@ export default function SurveyPage() {
 
       showNotification('success', 'Upload complete', result.message || 'Survey data imported', details)
       setFile(null)
-      await loadSurvey()
+      await loadSurvey(true)
     } catch (err: any) {
       showNotification('error', 'Upload failed', err.message || 'Failed to upload survey data')
       console.error('Survey upload error:', err)
@@ -380,6 +410,15 @@ export default function SurveyPage() {
                 Review CSAT survey feedback with access scoped by role.
               </p>
             </div>
+            <button
+              type="button"
+              onClick={() => void loadSurvey(true)}
+              disabled={isLoading}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-outline bg-surface px-3 py-2 text-sm font-semibold text-on-surface transition hover:bg-surface-dim disabled:opacity-50"
+            >
+              <RefreshCw size={17} className={isLoading ? 'animate-spin' : ''} />
+              Refresh
+            </button>
           </div>
 
           {notification && (
@@ -500,64 +539,64 @@ export default function SurveyPage() {
             </section>
           )}
 
-          {isAgentView ? (
-            <div className="space-y-8">
-              <div className="rounded-lg border border-outline-variant/60 bg-surface-dim p-5">
-                <div className="grid gap-4 md:grid-cols-[auto,1fr] md:items-end">
-                  <div>
-                    <p className="mb-2 block text-sm font-medium text-on-surface">Timeframe</p>
-                    <div className="inline-flex rounded-full border border-outline-variant bg-surface p-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setPeriodType('weekly')
-                          setSelectedPeriod('')
-                        }}
-                        className={`rounded-full px-4 py-2 text-sm font-semibold transition ${periodType === 'weekly' ? 'bg-primary-container text-on-primary-container' : 'text-on-surface-variant'}`}
-                      >
-                        Weekly
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setPeriodType('monthly')
-                          setSelectedPeriod('')
-                        }}
-                        className={`rounded-full px-4 py-2 text-sm font-semibold transition ${periodType === 'monthly' ? 'bg-primary-container text-on-primary-container' : 'text-on-surface-variant'}`}
-                      >
-                        Monthly
-                      </button>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label htmlFor="surveyPeriod" className="mb-2 block text-sm font-medium text-on-surface">
-                      {periodType === 'monthly' ? 'Month' : 'Week'}
-                    </label>
-                    <select
-                      id="surveyPeriod"
-                      value={selectedPeriod}
-                      onChange={event => setSelectedPeriod(event.target.value)}
-                      disabled={activePeriodOptions.length === 0}
-                      className="w-full rounded-lg border border-outline bg-surface px-4 py-2.5 text-on-surface outline-none transition focus:border-primary focus:ring-1 focus:ring-primary disabled:opacity-60"
-                    >
-                      {activePeriodOptions.length === 0 ? (
-                        <option value="">No uploaded survey dates available</option>
-                      ) : (
-                        activePeriodOptions.map(option => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))
-                      )}
-                    </select>
-                    <p className="mt-2 text-sm text-on-surface-variant">
-                      Showing {selectedPeriodLabel}. Options are based on uploaded survey dates only.
-                    </p>
-                  </div>
+          <div className="rounded-lg border border-outline-variant/60 bg-surface-dim p-5">
+            <div className="grid gap-4 md:grid-cols-[auto,1fr] md:items-end">
+              <div>
+                <p className="mb-2 block text-sm font-medium text-on-surface">Timeframe</p>
+                <div className="inline-flex rounded-full border border-outline-variant bg-surface p-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTablePage(1)
+                      setPeriodType('weekly')
+                      setSelectedPeriod('')
+                    }}
+                    className={`rounded-full px-4 py-2 text-sm font-semibold transition ${periodType === 'weekly' ? 'bg-primary-container text-on-primary-container' : 'text-on-surface-variant'}`}
+                  >
+                    Weekly
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTablePage(1)
+                      setPeriodType('monthly')
+                      setSelectedPeriod('')
+                    }}
+                    className={`rounded-full px-4 py-2 text-sm font-semibold transition ${periodType === 'monthly' ? 'bg-primary-container text-on-primary-container' : 'text-on-surface-variant'}`}
+                  >
+                    Monthly
+                  </button>
                 </div>
               </div>
 
+              <div>
+                <label htmlFor="surveyPeriod" className="mb-2 block text-sm font-medium text-on-surface">
+                  {periodType === 'monthly' ? 'Month' : 'Week'}
+                </label>
+                <select
+                  id="surveyPeriod"
+                  value={selectedPeriod}
+                  onChange={event => { setTablePage(1); setSelectedPeriod(event.target.value) }}
+                  disabled={activePeriodOptions.length === 0}
+                  className="w-full rounded-lg border border-outline bg-surface px-4 py-2.5 text-on-surface outline-none transition focus:border-primary focus:ring-1 focus:ring-primary disabled:opacity-60"
+                >
+                  {activePeriodOptions.length === 0 ? (
+                    <option value="">No uploaded survey dates available</option>
+                  ) : (
+                    activePeriodOptions.map(option => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))
+                  )}
+                </select>
+                <p className="mt-2 text-sm text-on-surface-variant">
+                  Showing {selectedPeriodLabel}. Options are based on uploaded survey dates only.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {isAgentView ? (
+            <div className="space-y-8">
               {groupedSurvey.map(group => (
                 <SurveyCarousel
                   key={group.value}
@@ -567,6 +606,13 @@ export default function SurveyPage() {
                   rows={group.rows}
                 />
               ))}
+              {totalTablePages > 1 && (
+                <div className="flex items-center justify-center gap-3">
+                  <button type="button" onClick={() => setTablePage(page => Math.max(1, page - 1))} disabled={safeTablePage === 1} className="rounded-lg border border-outline p-2 disabled:opacity-50" aria-label="Previous survey page"><ChevronLeft size={18} /></button>
+                  <span className="text-sm font-medium text-on-surface">Page {safeTablePage} of {totalTablePages}</span>
+                  <button type="button" onClick={() => setTablePage(page => Math.min(totalTablePages, page + 1))} disabled={safeTablePage === totalTablePages} className="rounded-lg border border-outline p-2 disabled:opacity-50" aria-label="Next survey page"><ChevronRight size={18} /></button>
+                </div>
+              )}
             </div>
           ) : (
             <>
@@ -589,7 +635,7 @@ export default function SurveyPage() {
                 </div>
               </div>
 
-              {filteredSurvey.length === 0 ? (
+              {survey.length === 0 ? (
                 <div className="flex flex-col items-center justify-center rounded-lg border border-outline-variant/60 bg-surface/70 py-16">
                   <AlertCircle size={40} className="mb-4 text-on-surface-variant/40" />
                   <p className="text-on-surface-variant">
@@ -600,7 +646,7 @@ export default function SurveyPage() {
                 <div className="space-y-3">
                   <div className="flex flex-col gap-3 rounded-lg border border-outline-variant/60 bg-surface-dim p-4 text-sm text-on-surface-variant sm:flex-row sm:items-center sm:justify-between">
                     <span>
-                      Showing {firstTableRow}-{lastTableRow} of {filteredSurvey.length} rows
+                      Showing {firstTableRow}-{lastTableRow} of {totalSurveyRows} rows
                     </span>
                     <div className="flex items-center gap-2">
                       <button
@@ -639,7 +685,7 @@ export default function SurveyPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {paginatedSurvey.map((row, index) => (
+                        {survey.map((row, index) => (
                           <tr
                             key={`${row.agent}-${row.response_id}`}
                             className={`border-b border-outline-variant/30 transition hover:bg-surface-dim ${index % 2 === 0 ? 'bg-surface' : 'bg-surface/50'}`}
