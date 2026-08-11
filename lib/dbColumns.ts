@@ -29,8 +29,6 @@ export const TICKET_DETAIL_COLUMNS = [
   'history',
   'notes',
   'reported',
-  'created_at',
-  'updated_at',
 ].join(', ')
 
 export const STATS_BASE_COLUMNS = [

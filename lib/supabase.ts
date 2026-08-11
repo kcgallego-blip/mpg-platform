@@ -165,8 +165,6 @@ export type Database = {
           history: Json
           notes: Json
           reported: boolean
-          created_at: string
-          updated_at: string
         }
         Insert: {
           ticketid?: number
@@ -186,8 +184,6 @@ export type Database = {
           history?: Json
           notes?: Json
           reported?: boolean
-          created_at?: string
-          updated_at?: string
         }
         Update: {
           ticketid?: number
@@ -207,7 +203,6 @@ export type Database = {
           history?: Json
           notes?: Json
           reported?: boolean
-          updated_at?: string
         }
       }
       reports: {
