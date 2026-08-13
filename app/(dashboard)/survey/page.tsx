@@ -74,11 +74,10 @@ const formatSurveyDate = (value: string | null) => {
   }
 }
 
-const getActiveComment = (row: SurveyRow) => {
-  const modComment = row.mod_comment?.trim()
-  const openComment = row.open_comment?.trim()
-  return modComment || openComment || ''
-}
+const getSurveyComments = (row: SurveyRow) => [
+  { label: 'MOD Comment', value: row.mod_comment?.trim() || '' },
+  { label: 'Open Comment', value: row.open_comment?.trim() || '' },
+].filter(comment => Boolean(comment.value))
 
 function SurveyCarousel({
   title,
@@ -140,7 +139,7 @@ function SurveyCarousel({
           className="scrollbar-hidden flex snap-x gap-4 overflow-x-auto pb-2"
         >
           {rows.map(row => {
-            const comment = getActiveComment(row)
+            const comments = getSurveyComments(row)
 
             return (
               <article
@@ -155,10 +154,19 @@ function SurveyCarousel({
                   <span className="text-5xl leading-none" aria-label={title}>{emoji}</span>
                 </div>
 
-                {comment && (
+                {comments.length > 0 && (
                   <div className="relative mt-6 rounded-lg border border-outline-variant/50 bg-surface p-4 text-sm leading-6 text-on-surface shadow-sm">
                     <span className="absolute -top-2 right-8 h-4 w-4 rotate-45 border-l border-t border-outline-variant/50 bg-surface" />
-                    <p className="relative whitespace-pre-wrap break-words">{comment}</p>
+                    <div className="relative space-y-3">
+                      {comments.map(comment => (
+                        <div key={comment.label}>
+                          <p className="text-xs font-semibold uppercase tracking-wide text-on-surface-variant">
+                            {comment.label}
+                          </p>
+                          <p className="whitespace-pre-wrap break-words">{comment.value}</p>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </article>
@@ -366,9 +374,11 @@ export default function SurveyPage() {
       }
 
       const details = [
-        `Imported ${result.imported ?? 0} rows`,
-        `Skipped ${result.duplicatesSkipped ?? 0} duplicates`,
-        `Skipped ${result.skippedSatisfiedWithoutMod ?? 0} satisfied rows without MOD Comment`,
+        `Imported ${result.imported ?? 0} new rows`,
+        `Updated ${result.updated ?? 0} existing rows`,
+        `Merged ${result.duplicateRowsInUpload ?? 0} duplicate rows in the upload`,
+        `Unchanged ${result.unchangedExisting ?? 0} existing rows`,
+        `Skipped ${result.skippedSatisfiedWithoutComment ?? 0} satisfied rows without comments`,
         `Skipped ${result.skippedInvalid ?? 0} invalid rows`,
         result.eligibleDateRange
           ? `Eligible dates ${result.eligibleDateRange.earliest} to ${result.eligibleDateRange.latest}`

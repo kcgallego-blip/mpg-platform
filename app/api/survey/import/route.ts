@@ -1,70 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
 import { getAuthenticatedDbUser } from '@/lib/sessionAuth'
-import { supabase } from '@/lib/supabase'
+import { supabaseAdmin } from '@/lib/supabaseAdmin'
+import {
+  findSurveyHeaderRowIndex,
+  getSurveyKey,
+  mergeExistingSurveyRecord,
+  mergeSurveyUploadDuplicates,
+  parseSurveyImportRows,
+  surveyImportRecordsEqual,
+  type RawSurveyRow,
+  type SurveyImportRecord,
+} from '@/lib/surveyImport'
 
 const ALLOWED_UPLOAD_ROLES = ['admin', 'manager', 'operations manager', 'team leader', 'supervisor']
-const ALLOWED_CSAT = new Set(['Unsatisfied', 'Neutral', 'Satisfied'])
-
-type RawSurveyRow = Record<string, unknown>
-
-const toText = (value: unknown) => {
-  if (value === null || value === undefined) return ''
-  return String(value).trim()
-}
-
-const normalizeCsat = (value: unknown) => {
-  const text = toText(value).toLowerCase()
-  if (text === 'unsatisfied') return 'Unsatisfied'
-  if (text === 'neutral') return 'Neutral'
-  if (text === 'satisfied') return 'Satisfied'
-  return ''
-}
-
-const parseExcelDate = (value: unknown) => {
-  if (value === null || value === undefined || value === '') return null
-
-  if (value instanceof Date) {
-    if (Number.isNaN(value.getTime())) return null
-    const year = value.getFullYear()
-    const month = String(value.getMonth() + 1).padStart(2, '0')
-    const day = String(value.getDate()).padStart(2, '0')
-    return `${year}-${month}-${day}`
-  }
-
-  if (typeof value === 'number') {
-    const parsed = XLSX.SSF.parse_date_code(value)
-    if (!parsed) return null
-    return `${parsed.y}-${String(parsed.m).padStart(2, '0')}-${String(parsed.d).padStart(2, '0')}`
-  }
-
-  const text = String(value).trim()
-  const dateMatch = text.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/) || text.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})/)
-
-  if (dateMatch) {
-    const isYearFirst = dateMatch[1].length === 4
-    const year = isYearFirst ? Number(dateMatch[1]) : Number(dateMatch[3].length === 2 ? `20${dateMatch[3]}` : dateMatch[3])
-    const month = Number(isYearFirst ? dateMatch[2] : dateMatch[1])
-    const day = Number(isYearFirst ? dateMatch[3] : dateMatch[2])
-
-    if (year && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
-      return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-    }
-  }
-
-  const parsedDate = new Date(text)
-  if (Number.isNaN(parsedDate.getTime())) return null
-
-  return `${parsedDate.getFullYear()}-${String(parsedDate.getMonth() + 1).padStart(2, '0')}-${String(parsedDate.getDate()).padStart(2, '0')}`
-}
-
-const getHeaderValue = (row: RawSurveyRow, header: string) => {
-  const foundKey = Object.keys(row).find(key => key.trim().toLowerCase() === header.toLowerCase())
-  return foundKey ? row[foundKey] : undefined
-}
-
-const getSurveyKey = (record: { agent: string; response_id: string }) =>
-  `${record.agent.toLowerCase()}::${record.response_id.toLowerCase()}`
 
 const getDateRange = (records: Array<{ survey_date: string | null }>) => {
   const sortedDates = records
@@ -121,7 +70,23 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Uploaded file does not contain a readable sheet' }, { status: 400 })
     }
 
+    const worksheetRows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+      header: 1,
+      defval: '',
+      raw: false,
+      blankrows: true,
+    })
+    const headerRowIndex = findSurveyHeaderRowIndex(worksheetRows)
+
+    if (headerRowIndex < 0) {
+      return NextResponse.json(
+        { error: 'Survey file must include Date, ID, Agent, and CSAT headers' },
+        { status: 400 }
+      )
+    }
+
     const rows = XLSX.utils.sheet_to_json<RawSurveyRow>(sheet, {
+      range: headerRowIndex,
       defval: '',
       raw: false,
     })
@@ -130,73 +95,37 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Survey file must include headers and at least one data row' }, { status: 400 })
     }
 
-    const dbRecords = []
-    let skippedSatisfiedWithoutMod = 0
-    let skippedInvalid = 0
-
-    for (const row of rows) {
-      const csat = normalizeCsat(getHeaderValue(row, 'CSAT'))
-      const responseId = toText(getHeaderValue(row, 'ID'))
-      const agent = toText(getHeaderValue(row, 'Agent'))
-      const modComment = toText(getHeaderValue(row, 'MOD Comment'))
-      const openComment = toText(getHeaderValue(row, 'Open Comment'))
-
-      if (!responseId || !agent || !ALLOWED_CSAT.has(csat)) {
-        skippedInvalid += 1
-        continue
-      }
-
-      if (csat === 'Satisfied' && !modComment) {
-        skippedSatisfiedWithoutMod += 1
-        continue
-      }
-
-      dbRecords.push({
-        survey_date: parseExcelDate(getHeaderValue(row, 'Date')),
-        response_id: responseId,
-        agent,
-        csat,
-        mod_comment: modComment || null,
-        open_comment: openComment || null,
-      })
-    }
+    const {
+      records: dbRecords,
+      skippedSatisfiedWithoutComment,
+      skippedInvalid,
+    } = parseSurveyImportRows(rows)
 
     if (dbRecords.length === 0) {
       return NextResponse.json(
         {
           error: 'No survey rows matched the ingestion rules',
-          skippedSatisfiedWithoutMod,
+          skippedSatisfiedWithoutComment,
           skippedInvalid,
         },
         { status: 400 }
       )
     }
 
-    const uploadUniqueRecords = []
-    const uploadSeenKeys = new Set<string>()
-    let duplicateRowsInUpload = 0
+    const {
+      records: uploadUniqueRecords,
+      duplicateRowsInUpload,
+    } = mergeSurveyUploadDuplicates(dbRecords)
 
-    for (const record of dbRecords) {
-      const key = getSurveyKey(record)
-
-      if (uploadSeenKeys.has(key)) {
-        duplicateRowsInUpload += 1
-        continue
-      }
-
-      uploadSeenKeys.add(key)
-      uploadUniqueRecords.push(record)
-    }
-
-    const existingKeys = new Set<string>()
+    const existingRecords = new Map<string, SurveyImportRecord>()
     const responseIds = Array.from(new Set(uploadUniqueRecords.map(record => record.response_id)))
     const batchSize = 100
 
     for (let i = 0; i < responseIds.length; i += batchSize) {
       const responseIdBatch = responseIds.slice(i, i + batchSize)
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('survey')
-        .select('agent, response_id')
+        .select('survey_date, response_id, agent, csat, mod_comment, open_comment')
         .in('response_id', responseIdBatch)
 
       if (error) {
@@ -204,28 +133,54 @@ export async function POST(request: NextRequest) {
           {
             error: `Failed to check existing survey data: ${error.message}`,
             imported: 0,
-            skippedSatisfiedWithoutMod,
+            updated: 0,
+            skippedSatisfiedWithoutComment,
             skippedInvalid,
           },
           { status: 500 }
         )
       }
 
-      for (const row of data || []) {
-        existingKeys.add(getSurveyKey(row))
+      for (const row of (data || []) as SurveyImportRecord[]) {
+        existingRecords.set(getSurveyKey(row), row)
       }
     }
 
-    const recordsToInsert = uploadUniqueRecords.filter(record => !existingKeys.has(getSurveyKey(record)))
-    const duplicatesSkipped = dbRecords.length - recordsToInsert.length
+    const recordsToWrite: SurveyImportRecord[] = []
+    const insertedKeys = new Set<string>()
     let imported = 0
-    const insertedRecords = []
+    let updated = 0
+    let unchangedExisting = 0
 
-    for (let i = 0; i < recordsToInsert.length; i += batchSize) {
-      const batch = recordsToInsert.slice(i, i + batchSize)
-      const { data, error } = await supabase
+    for (const incoming of uploadUniqueRecords) {
+      const key = getSurveyKey(incoming)
+      const existing = existingRecords.get(key)
+
+      if (!existing) {
+        recordsToWrite.push(incoming)
+        insertedKeys.add(key)
+        imported += 1
+        continue
+      }
+
+      const merged = mergeExistingSurveyRecord(existing, incoming)
+      if (surveyImportRecordsEqual(existing, merged)) {
+        unchangedExisting += 1
+        continue
+      }
+
+      recordsToWrite.push(merged)
+      updated += 1
+    }
+
+    const duplicatesSkipped = duplicateRowsInUpload + unchangedExisting
+    const writtenRecords: Array<{ agent: string; response_id: string; survey_date: string | null }> = []
+
+    for (let i = 0; i < recordsToWrite.length; i += batchSize) {
+      const batch = recordsToWrite.slice(i, i + batchSize)
+      const { data, error } = await supabaseAdmin
         .from('survey')
-        .insert(batch)
+        .upsert(batch, { onConflict: 'agent,response_id' })
         .select('agent, response_id, survey_date')
 
       if (error) {
@@ -233,7 +188,8 @@ export async function POST(request: NextRequest) {
           {
             error: `Failed to import survey data: ${error.message}`,
             imported,
-            skippedSatisfiedWithoutMod,
+            updated,
+            skippedSatisfiedWithoutComment,
             skippedInvalid,
             duplicatesSkipped,
           },
@@ -241,21 +197,27 @@ export async function POST(request: NextRequest) {
         )
       }
 
-      imported += data?.length || 0
-      insertedRecords.push(...(data || []))
+      writtenRecords.push(...(data || []))
     }
+
+    const insertedRecords = writtenRecords.filter(record => insertedKeys.has(getSurveyKey(record)))
+    const message = updated > 0
+      ? `Successfully imported ${imported} new survey rows and updated ${updated} existing rows`
+      : `Successfully imported ${imported} new survey rows`
 
     return NextResponse.json({
       success: true,
       imported,
+      updated,
       duplicatesSkipped,
       duplicateRowsInUpload,
-      skippedSatisfiedWithoutMod,
+      unchangedExisting,
+      skippedSatisfiedWithoutComment,
       skippedInvalid,
       eligibleRows: dbRecords.length,
       eligibleDateRange: getDateRange(dbRecords),
       importedDateRange: getDateRange(insertedRecords),
-      message: `Successfully imported ${imported} survey rows`,
+      message,
     })
   } catch (error: any) {
     console.error('Survey import error:', error)
