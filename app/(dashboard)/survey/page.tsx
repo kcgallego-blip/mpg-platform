@@ -16,6 +16,7 @@ import {
 } from 'lucide-react'
 import { useRequireAuth } from '@/lib/useRequireAuth'
 import { getClientCache, invalidateClientCache, setClientCache } from '@/lib/clientCache'
+import { shouldCacheRoleScopedData } from '@/lib/statsAccess'
 
 type SurveyRow = {
   survey_date: string | null
@@ -217,11 +218,12 @@ export default function SurveyPage() {
         queryParams.set('search', debouncedSearchQuery)
       }
 
-      const cachePrefix = `survey:${user.email}:`
+      const cachePrefix = `survey:v2:${user.email}:`
       const cacheKey = `${cachePrefix}${queryParams.toString()}`
       if (force) invalidateClientCache(cachePrefix)
 
-      let data = force ? null : getClientCache<SurveyResponse>(cacheKey)
+      const shouldUseCache = shouldCacheRoleScopedData(user.role)
+      let data = force || !shouldUseCache ? null : getClientCache<SurveyResponse>(cacheKey)
 
       if (!data) {
         const response = await fetch(`/api/survey?${queryParams}`, { cache: 'no-store' })
@@ -236,9 +238,11 @@ export default function SurveyPage() {
         }
 
         data = await response.json() as SurveyResponse
-        setClientCache(cacheKey, data, SURVEY_CACHE_TTL_MS)
+        if (shouldUseCache) {
+          setClientCache(cacheKey, data, SURVEY_CACHE_TTL_MS)
+        }
 
-        if (data.periodValue && data.periodValue !== selectedPeriod) {
+        if (shouldUseCache && data.periodValue && data.periodValue !== selectedPeriod) {
           const resolvedParams = new URLSearchParams(queryParams)
           resolvedParams.set('period', data.periodValue)
           setClientCache(`${cachePrefix}${resolvedParams.toString()}`, data, SURVEY_CACHE_TTL_MS)
@@ -261,7 +265,7 @@ export default function SurveyPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [debouncedSearchQuery, periodType, router, selectedPeriod, tablePage, user?.email])
+  }, [debouncedSearchQuery, periodType, router, selectedPeriod, tablePage, user?.email, user?.role])
 
   useEffect(() => {
     if (isReady && user) {

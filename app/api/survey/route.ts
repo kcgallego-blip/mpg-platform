@@ -1,10 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthenticatedDbUser } from '@/lib/sessionAuth'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
+import {
+  getStatsNameSearchFragments,
+  getUniqueStatsIdentityNames,
+  resolveRosterScopedAgentNames,
+} from '@/lib/statsIdentity'
 
 const MIN_SURVEY_WEEK = 27
 const MIN_SURVEY_MONTH = 7
 const MAX_PAGE_SIZE = 50
+const AGENT_NAME_CANDIDATE_LIMIT = 100
+const NO_AGENT_MATCH = '__mpg_no_agent_match__'
 const SURVEY_COLUMNS = 'survey_date, response_id, agent, csat, mod_comment, open_comment, created_at'
 const noStoreHeaders = { 'Cache-Control': 'private, no-store, max-age=0' }
 
@@ -130,6 +137,68 @@ const getPeriodRange = (periodType: PeriodType, value: string) => {
   return { from: toDateKey(from), to: toDateKey(to) }
 }
 
+async function getCanonicalAgentName(email: string) {
+  const { data, error } = await supabaseAdmin
+    .from('agents')
+    .select('name')
+    .ilike('email', email.trim())
+    .limit(1)
+
+  if (error) {
+    console.error('Survey canonical agent lookup error:', error)
+    return null
+  }
+
+  return data?.[0]?.name?.trim() || null
+}
+
+async function resolveSurveyAgentNames(identityNames: string[]) {
+  const candidateSet = new Set<string>()
+
+  for (const identityName of identityNames) {
+    const exactResult = await supabaseAdmin
+      .from('survey')
+      .select('agent')
+      .not('agent', 'is', null)
+      .ilike('agent', identityName)
+      .limit(1)
+
+    if (exactResult.error) throw exactResult.error
+    const exactName = exactResult.data?.[0]?.agent?.trim()
+    if (exactName) candidateSet.add(exactName)
+
+    const candidateResults = await Promise.all(getStatsNameSearchFragments(identityName).map(fragment =>
+      supabaseAdmin
+        .from('survey')
+        .select('agent')
+        .not('agent', 'is', null)
+        .ilike('agent', `%${fragment}%`)
+        .order('survey_date', { ascending: false, nullsFirst: false })
+        .limit(AGENT_NAME_CANDIDATE_LIMIT)
+    ))
+    const failedResult = candidateResults.find(result => result.error)
+    if (failedResult?.error) throw failedResult.error
+
+    candidateResults.forEach(result => {
+      ((result.data || []) as Array<{ agent?: string | null }>).forEach(row => {
+        const candidate = row.agent?.trim()
+        if (candidate) candidateSet.add(candidate)
+      })
+    })
+  }
+
+  const candidates = Array.from(candidateSet)
+  if (candidates.length === 0) return []
+
+  const rosterResult = await supabaseAdmin.from('agents').select('name')
+  if (rosterResult.error) throw rosterResult.error
+  const rosterNames = ((rosterResult.data || []) as Array<{ name?: string | null }>)
+    .map(row => row.name?.trim())
+    .filter((name): name is string => Boolean(name))
+
+  return resolveRosterScopedAgentNames(candidates, identityNames, rosterNames)
+}
+
 async function getSurveyPeriodDates(agentName: string | null) {
   const { data, error } = await supabaseAdmin.rpc('get_survey_period_dates', {
     p_agent_name: agentName,
@@ -152,23 +221,25 @@ async function getSurveyPeriodDates(agentName: string | null) {
 }
 
 async function getSurveyPage(params: {
-  agentName: string | null
+  agentNames: string[] | null
   from: string
   to: string
   search: string
   offset: number
   pageSize: number
 }) {
-  const rpcResult = await supabaseAdmin.rpc('get_survey_page', {
-    p_from: params.from,
-    p_to: params.to,
-    p_agent_name: params.agentName,
-    p_search: params.search || null,
-    p_offset: params.offset,
-    p_limit: params.pageSize,
-  })
+  const rpcResult = !params.agentNames || params.agentNames.length === 1
+    ? await supabaseAdmin.rpc('get_survey_page', {
+        p_from: params.from,
+        p_to: params.to,
+        p_agent_name: params.agentNames?.[0] || null,
+        p_search: params.search || null,
+        p_offset: params.offset,
+        p_limit: params.pageSize,
+      })
+    : null
 
-  if (!rpcResult.error) {
+  if (rpcResult && !rpcResult.error) {
     const rows = (rpcResult.data || []) as Array<Record<string, unknown> & { total_count?: number }>
     const total = Number(rows[0]?.total_count || 0)
     return {
@@ -177,7 +248,9 @@ async function getSurveyPage(params: {
     }
   }
 
-  console.warn('Survey page RPC unavailable; using PostgREST filters:', rpcResult.error.message)
+  if (rpcResult?.error) {
+    console.warn('Survey page RPC unavailable; using PostgREST filters:', rpcResult.error.message)
+  }
   let query = supabaseAdmin
     .from('survey')
     .select(SURVEY_COLUMNS, { count: 'exact' })
@@ -187,7 +260,8 @@ async function getSurveyPage(params: {
     .order('created_at', { ascending: false })
     .range(params.offset, params.offset + params.pageSize - 1)
 
-  if (params.agentName) query = query.ilike('agent', params.agentName)
+  if (params.agentNames?.length === 1) query = query.ilike('agent', params.agentNames[0])
+  if (params.agentNames && params.agentNames.length > 1) query = query.in('agent', params.agentNames)
   if (params.search) {
     const search = params.search.replace(/[(),]/g, ' ').trim()
     query = query.or(`response_id.ilike.%${search}%,agent.ilike.%${search}%,csat.ilike.%${search}%,mod_comment.ilike.%${search}%,open_comment.ilike.%${search}%`)
@@ -207,15 +281,26 @@ export async function GET(request: NextRequest) {
 
     const userRole = dbUser.role || 'Agent'
     const userName = dbUser.name || ''
-    const isAgent = userRole.toLowerCase() === 'agent'
-    const agentName = isAgent && userName ? userName : null
+    const isAgent = userRole.trim().toLowerCase() === 'agent'
+    const canonicalAgentName = isAgent ? await getCanonicalAgentName(dbUser.email) : null
+    const agentIdentityNames = isAgent
+      ? getUniqueStatsIdentityNames([userName, canonicalAgentName])
+      : []
+    const resolvedAgentNames = isAgent && agentIdentityNames.length > 0
+      ? await resolveSurveyAgentNames(agentIdentityNames)
+      : []
+    const surveyAgentNames = isAgent
+      ? resolvedAgentNames.length > 0 ? resolvedAgentNames : [NO_AGENT_MATCH]
+      : null
     const periodType = parsePeriodType(request.nextUrl.searchParams.get('periodType'))
     const requestedPeriod = request.nextUrl.searchParams.get('period')
     const page = parsePositiveInteger(request.nextUrl.searchParams.get('page'), 1)
     const pageSize = Math.min(parsePositiveInteger(request.nextUrl.searchParams.get('pageSize'), MAX_PAGE_SIZE), MAX_PAGE_SIZE)
     const search = (request.nextUrl.searchParams.get('search') || '').trim().slice(0, 200)
 
-    const periodDates = await getSurveyPeriodDates(agentName)
+    const periodDates = surveyAgentNames
+      ? (await Promise.all(surveyAgentNames.map(getSurveyPeriodDates))).flat()
+      : await getSurveyPeriodDates(null)
     const weeklyOptions = getPeriodOptions(periodDates, 'weekly')
     const monthlyOptions = getPeriodOptions(periodDates, 'monthly')
     const activeOptions = periodType === 'monthly' ? monthlyOptions : weeklyOptions
@@ -239,7 +324,7 @@ export async function GET(request: NextRequest) {
     }
 
     const result = await getSurveyPage({
-      agentName,
+      agentNames: surveyAgentNames,
       from: periodRange.from,
       to: periodRange.to,
       search,

@@ -1,10 +1,11 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAuthStore } from '@/lib/authStore'
 import { useRouter } from 'next/navigation'
 import { getClientCache, setClientCache } from '@/lib/clientCache'
-import { canUploadStats } from '@/lib/statsAccess'
+import { canUploadStats, shouldCacheRoleScopedData } from '@/lib/statsAccess'
+import { getAgentStatsFallbackPeriod } from '@/lib/statsIdentity'
 import {
   Loader2,
   Search,
@@ -179,6 +180,10 @@ export default function StatsPage() {
   const [selectedMonth, setSelectedMonth] = useState(() => new Date().getMonth() + 1)
   const [periodType, setPeriodType] = useState<'weekly' | 'monthly'>('weekly')
   const [displayedRange, setDisplayedRange] = useState(() => getStatsWeekRange())
+  const initializedAgentPeriods = useRef<Record<'weekly' | 'monthly', boolean>>({
+    weekly: false,
+    monthly: false,
+  })
 
   const displayedDateRange = useMemo(() => {
     if (periodType === 'monthly') {
@@ -217,8 +222,9 @@ export default function StatsPage() {
         pageSize: String(STATS_PAGE_SIZE),
       })
 
-      const cacheKey = `stats:v2:${user.email}:${queryParams.toString()}`
-      let data = getClientCache<StatsResponse>(cacheKey)
+      const cacheKey = `stats:v3:${user.email}:${queryParams.toString()}`
+      const shouldUseCache = shouldCacheRoleScopedData(user.role)
+      let data = shouldUseCache ? getClientCache<StatsResponse>(cacheKey) : null
 
       if (!data) {
         const response = await fetch(`/api/stats?${queryParams}`, { cache: 'no-store' })
@@ -232,7 +238,9 @@ export default function StatsPage() {
         }
 
         data = await response.json() as StatsResponse
-        setClientCache(cacheKey, data, STATS_CACHE_TTL_MS)
+        if (shouldUseCache) {
+          setClientCache(cacheKey, data, STATS_CACHE_TTL_MS)
+        }
       }
       setStats(data.stats || [])
       setTotalStatsRows(data.total || 0)
@@ -249,14 +257,30 @@ export default function StatsPage() {
       } else {
         setAvailableWeeks(normalizedAvailablePeriods)
       }
+
+      const responsePeriodType = data.periodType || periodType
+      const selectedPeriod = responsePeriodType === 'monthly' ? selectedMonth : selectedWeek
+      let agentFallbackPeriod: number | null = null
+      if (
+        data.userRole?.trim().toLowerCase() === 'agent' &&
+        !initializedAgentPeriods.current[responsePeriodType]
+      ) {
+        initializedAgentPeriods.current[responsePeriodType] = true
+        agentFallbackPeriod = getAgentStatsFallbackPeriod(
+          selectedPeriod,
+          normalizedAvailablePeriods,
+          data.stats.length > 0
+        )
+      }
       if (data.periodType) {
         setPeriodType(data.periodType)
       }
-      if (data.periodValue) {
-        if (data.periodType === 'monthly') {
-          setSelectedMonth(Number(data.periodValue))
+      if (data.periodValue || agentFallbackPeriod !== null) {
+        const nextPeriod = agentFallbackPeriod ?? Number(data.periodValue)
+        if (responsePeriodType === 'monthly') {
+          setSelectedMonth(nextPeriod)
         } else {
-          setSelectedWeek(Number(data.periodValue))
+          setSelectedWeek(nextPeriod)
         }
       }
     } catch (err: any) {
@@ -265,7 +289,11 @@ export default function StatsPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [user?.email, selectedSupervisor, sortConfig, periodType, selectedMonth, selectedWeek, debouncedSearchQuery, currentPage, router])
+  }, [user?.email, user?.role, selectedSupervisor, sortConfig, periodType, selectedMonth, selectedWeek, debouncedSearchQuery, currentPage, router])
+
+  useEffect(() => {
+    initializedAgentPeriods.current = { weekly: false, monthly: false }
+  }, [user?.email])
 
   useEffect(() => {
     loadStats()

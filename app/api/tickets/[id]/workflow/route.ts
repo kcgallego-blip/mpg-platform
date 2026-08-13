@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthenticatedDbUser } from '@/lib/sessionAuth'
 import { supabase } from '@/lib/supabase'
+import { normalizeDatabaseTime } from '@/lib/ticketTime'
 
 type WorkflowBody = {
   action?: unknown
@@ -8,6 +9,7 @@ type WorkflowBody = {
   troubleshooting?: unknown
   note?: unknown
   reported?: unknown
+  endTime?: unknown
 }
 
 function asTrimmedString(value: unknown): string | null {
@@ -59,6 +61,13 @@ export async function POST(
       return NextResponse.json({ error: 'Reported must be true or false' }, { status: 400 })
     }
 
+    const endTime = action === 'solve'
+      ? normalizeDatabaseTime(body.endTime)
+      : getPhilippineTime(now)
+    if (action === 'solve' && !endTime) {
+      return NextResponse.json({ error: 'A valid completion time is required' }, { status: 400 })
+    }
+
     const { data, error } = action === 'set_reported'
       ? await supabase.rpc('set_ticket_reported', {
           p_ticket_id: ticketId,
@@ -74,7 +83,7 @@ export async function POST(
           p_troubleshooting: asTrimmedString(body.troubleshooting),
           p_note: asTrimmedString(body.note),
           p_event_timestamp: now.toISOString(),
-          p_end_time: getPhilippineTime(now),
+          p_end_time: endTime,
         })
 
     if (error) {

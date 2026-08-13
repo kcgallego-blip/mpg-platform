@@ -35,6 +35,11 @@ import {
   parseTicketNotes,
   type TicketStatus,
 } from '@/lib/ticketAudit'
+import {
+  convertTwelveHourTimeToDatabaseTime,
+  getCurrentManilaTime,
+  type Meridiem,
+} from '@/lib/ticketTime'
 
 type Ticket = Database['public']['Tables']['tickets']['Row']
 type TicketListItem = Pick<Ticket,
@@ -268,6 +273,8 @@ export default function ITReportsPage() {
   const [assistantOption, setAssistantOption] = useState('')
   const [customAssistant, setCustomAssistant] = useState('')
   const [troubleshooting, setTroubleshooting] = useState('')
+  const [solveTime, setSolveTime] = useState('')
+  const [solveMeridiem, setSolveMeridiem] = useState<Meridiem>('AM')
   const [noteText, setNoteText] = useState('')
   const [workflowError, setWorkflowError] = useState<string | null>(null)
   const [savingAction, setSavingAction] = useState<TicketWorkflowRequest['action'] | 'delete' | null>(null)
@@ -362,6 +369,7 @@ export default function ITReportsPage() {
   }, [currentPage, totalPages])
 
   const showTicketDetail = (ticket: Ticket) => {
+    const currentTime = getCurrentManilaTime()
     const assistant = ticket.assisted_by?.trim() || ''
     if (IT_STAFF.some((staff) => staff === assistant)) {
       setAssistantOption(assistant)
@@ -375,6 +383,8 @@ export default function ITReportsPage() {
     }
     setSelectedTicket(ticket)
     setTroubleshooting(ticket.troubleshooting || '')
+    setSolveTime(currentTime.time)
+    setSolveMeridiem(currentTime.meridiem)
     setNoteText('')
     setWorkflowError(null)
   }
@@ -447,10 +457,16 @@ export default function ITReportsPage() {
       setWorkflowError('Enter troubleshooting details before marking this ticket as Solved.')
       return
     }
+    const endTime = convertTwelveHourTimeToDatabaseTime(solveTime, solveMeridiem)
+    if (!endTime) {
+      setWorkflowError('Enter a valid completion time in h:mm format, then select AM or PM.')
+      return
+    }
     void performWorkflow({
       action: 'solve',
       assistedBy: assignedName || undefined,
       troubleshooting: troubleshooting.trim(),
+      endTime,
     }, 'solve')
   }
 
@@ -744,13 +760,47 @@ export default function ITReportsPage() {
                         <textarea id="troubleshooting" value={troubleshooting} onChange={(event) => { setTroubleshooting(event.target.value); setWorkflowError(null) }} rows={5} maxLength={8000} placeholder="Document diagnostics and troubleshooting steps..." disabled={saving} className="w-full resize-y rounded-lg border border-outline-variant/50 bg-surface px-3 py-2.5 text-sm text-on-surface outline-none focus:border-primary" />
                       )}
                     </div>
+                    {selectedStatus !== 'Solved' && (
+                      <div>
+                        <label htmlFor="solve-time" className="mb-1.5 block text-sm font-medium text-on-surface">
+                          Completion Time <span className="text-error">*</span>
+                        </label>
+                        <div className="flex gap-2">
+                          <input
+                            id="solve-time"
+                            type="text"
+                            inputMode="numeric"
+                            value={solveTime}
+                            onChange={(event) => { setSolveTime(event.target.value); setWorkflowError(null) }}
+                            placeholder="h:mm"
+                            maxLength={5}
+                            disabled={saving}
+                            aria-describedby="solve-time-hint"
+                            className="min-w-0 flex-1 rounded-lg border border-outline-variant/50 bg-surface px-3 py-2.5 text-sm text-on-surface outline-none focus:border-primary"
+                          />
+                          <select
+                            aria-label="Completion time AM or PM"
+                            value={solveMeridiem}
+                            onChange={(event) => { setSolveMeridiem(event.target.value as Meridiem); setWorkflowError(null) }}
+                            disabled={saving}
+                            className="w-24 rounded-lg border border-outline-variant/50 bg-surface px-3 py-2.5 text-sm text-on-surface outline-none focus:border-primary"
+                          >
+                            <option value="AM">AM</option>
+                            <option value="PM">PM</option>
+                          </select>
+                        </div>
+                        <p id="solve-time-hint" className="mt-1.5 text-xs text-on-surface-variant">
+                          Current Philippine time is filled in automatically. Use h:mm format.
+                        </p>
+                      </div>
+                    )}
                     {workflowError && <div className="flex items-start gap-2 rounded-lg bg-error/10 p-3 text-sm text-error"><AlertCircle size={17} className="mt-0.5 shrink-0" />{workflowError}</div>}
                     {selectedStatus !== 'Solved' && (
                       <div className="flex flex-col-reverse gap-2 border-t border-outline-variant/20 pt-4 sm:flex-row sm:flex-wrap sm:justify-end">
                         {selectedStatus === 'Open' && <button type="button" onClick={() => void handleDelete()} disabled={saving} className="inline-flex items-center justify-center gap-2 rounded-lg border border-error/40 px-4 py-2.5 text-sm font-medium text-error hover:bg-error/10 disabled:opacity-45 sm:mr-auto">{savingAction === 'delete' ? <Loader2 size={17} className="animate-spin" /> : <Trash2 size={17} />}Delete ticket</button>}
                         <button type="button" onClick={() => void performWorkflow({ action: 'save_troubleshooting', troubleshooting: troubleshooting.trim() })} disabled={saving || !troubleshooting.trim() || troubleshooting.trim() === (selectedTicket.troubleshooting || '').trim()} className="inline-flex items-center justify-center gap-2 rounded-lg border border-outline-variant/40 px-4 py-2.5 text-sm font-medium disabled:opacity-45">{savingAction === 'save_troubleshooting' ? <Loader2 size={17} className="animate-spin" /> : <Wrench size={17} />}Save progress</button>
                         {selectedStatus === 'Open' && <button type="button" onClick={handlePending} disabled={saving || !assignedName} className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary-container px-4 py-2.5 text-sm font-medium text-on-primary-container disabled:opacity-45">{savingAction === 'pending' ? <Loader2 size={17} className="animate-spin" /> : <PauseCircle size={17} />}Put to Pending</button>}
-                        <button type="button" onClick={handleSolve} disabled={saving || !troubleshooting.trim()} className="inline-flex items-center justify-center gap-2 rounded-lg bg-success px-4 py-2.5 text-sm font-medium text-on-success disabled:opacity-45">{savingAction === 'solve' ? <Loader2 size={17} className="animate-spin" /> : <CheckCircle2 size={17} />}Mark as Solved</button>
+                        <button type="button" onClick={handleSolve} disabled={saving || !troubleshooting.trim() || !solveTime.trim()} className="inline-flex items-center justify-center gap-2 rounded-lg bg-success px-4 py-2.5 text-sm font-medium text-on-success disabled:opacity-45">{savingAction === 'solve' ? <Loader2 size={17} className="animate-spin" /> : <CheckCircle2 size={17} />}Mark as Solved</button>
                       </div>
                     )}
                   </div>

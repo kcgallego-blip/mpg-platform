@@ -199,7 +199,7 @@ export async function updateTicket(ticketId: number, updates: Partial<Database['
 
 export type TicketWorkflowRequest =
   | { action: 'pending'; assistedBy: string }
-  | { action: 'solve'; assistedBy?: string; troubleshooting: string }
+  | { action: 'solve'; assistedBy?: string; troubleshooting: string; endTime: string }
   | { action: 'add_note'; note: string }
   | { action: 'save_troubleshooting'; troubleshooting: string }
   | { action: 'set_reported'; reported: boolean }
