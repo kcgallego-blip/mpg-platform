@@ -6,15 +6,10 @@ import {
   ProductivityTicketRow,
   aggregateProductivityReport,
 } from './productivityReport'
-import { normalizeNameForMatch } from './tphProductivity'
 
 type UserNameRow = {
   email: string
   name: string | null
-}
-
-type TeamAgentRow = {
-  name: string
 }
 
 const PAGE_SIZE = 1000
@@ -64,12 +59,8 @@ const getNamesByEmail = async (emails: string[]) => {
 
 export const getProductivityReport = async ({
   shiftDate,
-  requesterRole,
-  requesterName,
 }: {
   shiftDate: string
-  requesterRole: string
-  requesterName: string
 }): Promise<ProductivityReport> => {
   const allTickets = await getTicketRows(shiftDate)
   const emails = Array.from(
@@ -80,42 +71,11 @@ export const getProductivityReport = async ({
     )
   )
   const namesByEmail = await getNamesByEmail(emails)
-  let scopedTickets = allTickets
-  let scopeLabel = 'All teams'
-
-  if (requesterRole === 'Team Leader') {
-    if (!requesterName.trim()) {
-      throw new Error('The Team Leader account has no profile name for team scoping')
-    }
-
-    const { data, error } = await supabaseAdmin
-      .from('agents')
-      .select('name')
-      .eq('team_leader', requesterName)
-
-    if (error) throw new Error(`Unable to resolve Team Leader scope: ${error.message}`)
-
-    const teamNames = new Set(
-      ((data || []) as TeamAgentRow[])
-        .map((agent) => normalizeNameForMatch(agent.name))
-        .filter(Boolean)
-    )
-
-    scopedTickets = allTickets.filter((ticket) => {
-      const email = ticket.agent?.trim() || ''
-      const displayName = namesByEmail.get(email)
-      return (
-        teamNames.has(normalizeNameForMatch(displayName)) ||
-        teamNames.has(normalizeNameForMatch(email))
-      )
-    })
-    scopeLabel = `${requesterName}'s team`
-  }
 
   return aggregateProductivityReport({
     shiftDate,
-    tickets: scopedTickets,
+    tickets: allTickets,
     namesByEmail,
-    scopeLabel,
+    scopeLabel: 'All teams',
   })
 }

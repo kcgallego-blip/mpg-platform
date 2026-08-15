@@ -205,7 +205,7 @@ export default function StaffingPage() {
 
       setError('')
 
-      const cacheKey = `staffing:${user.email}`
+      const cacheKey = `staffing:all-agents:${user.email}`
       if (force) invalidateClientCache(cacheKey)
       let data = force ? null : getClientCache<ScheduleResponse>(cacheKey)
 
@@ -219,10 +219,6 @@ export default function StaffingPage() {
 
       const nextAgents = data.agents
       const nextSupervisors = data.supervisors
-      const preferredSupervisor = normalizeNameValue(user?.name)
-      const matchingSupervisor = nextSupervisors.find(
-        (supervisor) => normalizeNameValue(supervisor) === preferredSupervisor
-      )
 
       setAgents(nextAgents)
       setSupervisors(nextSupervisors)
@@ -230,10 +226,6 @@ export default function StaffingPage() {
       setSelectedSupervisors((current) => {
         if (current.length > 0) {
           return current
-        }
-
-        if (matchingSupervisor) {
-          return [matchingSupervisor]
         }
 
         return nextSupervisors
@@ -245,7 +237,7 @@ export default function StaffingPage() {
         setIsLoading(false)
       }
     }
-  }, [user?.email, user?.name])
+  }, [user?.email])
 
   useEffect(() => {
     void loadSchedule(true)
@@ -309,7 +301,7 @@ export default function StaffingPage() {
       }
       if (user?.email) {
         const nextAgents = agents.map((item) => item.id === agentId ? { ...item, present: nextPresent } : item)
-        setClientCache(`staffing:${user.email}`, { agents: nextAgents, supervisors }, STAFFING_CACHE_TTL_MS)
+        setClientCache(`staffing:all-agents:${user.email}`, { agents: nextAgents, supervisors }, STAFFING_CACHE_TTL_MS)
       }
     } catch (updateError: any) {
       setAgents((current) =>

@@ -10,6 +10,74 @@ export type Json =
 export interface Database {
   public: {
     Tables: {
+      support_categories: {
+        Row: {
+          id: string
+          name: string
+          columns: Json
+          is_quick_access: boolean
+          quick_access_order: number
+          sort_order: number
+          created_by: string | null
+          updated_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          columns: Json
+          is_quick_access?: boolean
+          quick_access_order?: number
+          sort_order?: number
+          created_by?: string | null
+          updated_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          name?: string
+          columns?: Json
+          is_quick_access?: boolean
+          quick_access_order?: number
+          sort_order?: number
+          updated_by?: string | null
+          updated_at?: string
+        }
+      }
+      support_rows: {
+        Row: {
+          id: string
+          category_id: string
+          data: Json
+          cell_formats: Json
+          created_by: string | null
+          updated_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          category_id: string
+          data?: Json
+          cell_formats?: Json
+          created_by?: string | null
+          updated_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          data?: Json
+          cell_formats?: Json
+          updated_by?: string | null
+          updated_at?: string
+        }
+      }
+      support_revision: {
+        Row: { id: boolean; version: number; updated_at: string }
+        Insert: { id?: boolean; version?: number; updated_at?: string }
+        Update: { version?: number; updated_at?: string }
+      }
       users: {
         Row: {
           id: string
@@ -398,6 +466,18 @@ export interface Database {
       }
     }
     Functions: {
+      bulk_delete_support_rows: {
+        Args: { p_row_ids: string[] }
+        Returns: number
+      }
+      get_support_payload: {
+        Args: Record<PropertyKey, never>
+        Returns: Json
+      }
+      bulk_insert_support_rows: {
+        Args: { p_category_id: string; p_rows: Json; p_actor: string }
+        Returns: number
+      }
       reconcile_agents: {
         Args: {
           p_updates?: Json

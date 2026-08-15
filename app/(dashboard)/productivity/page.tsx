@@ -281,7 +281,7 @@ export default function ProductivityPage() {
 
       const nextDataSource = getTphDataSourceForShiftDate(selectedShiftDate, currentShiftDate)
       setDataSource(nextDataSource)
-      const cachePrefix = `productivity:${user.email}:`
+      const cachePrefix = `productivity:role-scoped:${user.email}:`
       const cacheKey = `${cachePrefix}${selectedShiftDate}:${selectedStatus}`
       if (force) invalidateClientCache(cachePrefix)
       const cached = force ? null : getClientCache<ProductivityCacheEntry>(cacheKey)
@@ -298,16 +298,6 @@ export default function ProductivityPage() {
 
         if (normalizedRole === 'agent') {
           visibleAgentKeys = Array.from(new Set([user.email, user.name].filter(Boolean))) as string[]
-        } else if (['team leader', 'supervisor'].includes(normalizedRole) && user.name) {
-          const { data: teamAgents, error: teamAgentsError } = await supabase
-            .from('agents')
-            .select('email')
-            .ilike('team_leader', user.name)
-
-          if (teamAgentsError) throw teamAgentsError
-          visibleAgentKeys = ((teamAgents || []) as Array<{ email: string | null }>)
-            .map((agent) => agent.email)
-            .filter((email): email is string => Boolean(email))
         }
 
         if (visibleAgentKeys?.length === 0) {

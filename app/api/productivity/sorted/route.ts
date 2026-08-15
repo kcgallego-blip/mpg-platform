@@ -8,7 +8,6 @@ import {
   getStatusFilteredCounts,
   getTotalTicketCount,
   getTphDataSourceForShiftDate,
-  normalizeNameForMatch,
   parseHourlyTickets,
   parseSummaryTickets,
 } from '@/lib/tphProductivity'
@@ -25,10 +24,6 @@ type TphRow = {
 type UserNameRow = {
   email: string
   name: string | null
-}
-
-type TeamAgentRow = {
-  name: string
 }
 
 type TphSummaryRow = {
@@ -190,25 +185,7 @@ export async function GET(request: NextRequest) {
         })
       }
 
-      let summaries = Array.from(summariesByEmail.values())
-
-      if (user.role === 'Team Leader') {
-        const { data: teamAgents, error: teamError } = await supabase
-          .from('agents')
-          .select('name')
-          .eq('team_leader', user.name)
-
-        if (teamError) throw teamError
-
-        const teamNames = new Set(
-          ((teamAgents || []) as TeamAgentRow[]).map((agent) => normalizeNameForMatch(agent.name))
-        )
-
-        summaries = summaries.filter((summary) =>
-          teamNames.has(normalizeNameForMatch(namesByEmail.get(summary.email) || summary.name)) ||
-          teamNames.has(normalizeNameForMatch(summary.email))
-        )
-      }
+      const summaries = Array.from(summariesByEmail.values())
 
       summaries.sort((first, second) => {
         if (first.totalTickets !== second.totalTickets) {
@@ -320,27 +297,7 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    let summariesForRole = Array.from(summariesByEmail.values())
-
-    if (user.role === 'Team Leader') {
-      const { data: teamAgents, error: teamError } = await supabase
-        .from('agents')
-        .select('name')
-        .eq('team_leader', user.name)
-
-      if (teamError) throw teamError
-
-      const teamNames = new Set(
-        ((teamAgents || []) as TeamAgentRow[]).map((agent) => normalizeNameForMatch(agent.name))
-      )
-
-      summariesForRole = summariesForRole.filter((summary) =>
-        teamNames.has(normalizeNameForMatch(summary.name)) ||
-        teamNames.has(normalizeNameForMatch(summary.email))
-      )
-    }
-
-    const summaries = summariesForRole.map((summary) => {
+    const summaries = Array.from(summariesByEmail.values()).map((summary) => {
       const metrics = calculateAgentMetrics(rowsByEmail.get(summary.email) || [])
 
       return {

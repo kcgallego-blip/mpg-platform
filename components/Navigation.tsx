@@ -3,7 +3,7 @@ import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/lib/authStore'
 import { useFeatureSettingsStore } from '@/lib/featureSettingsStore'
 import { getPostLoginRoute } from '@/lib/routes'
-import { LogOut, User, LayoutDashboard, Ticket, FileText, ChevronDown, ChevronRight, Users, BarChart3, TrendingUp, Wrench, MessageSquareText, CalendarClock, SlidersHorizontal } from 'lucide-react'
+import { LogOut, User, LayoutDashboard, Ticket, FileText, ChevronDown, ChevronRight, Users, BarChart3, TrendingUp, Wrench, MessageSquareText, CalendarClock, SlidersHorizontal, BookOpen } from 'lucide-react'
 import { useState, useEffect, useRef, type ComponentType } from 'react'
 import Image from 'next/image'
 
@@ -13,6 +13,7 @@ type NavItem = { href: string; icon: IconComponent; label: string } | { label: s
 
 const allNavItems: NavItem[] = [
   { href: '/staffing', icon: LayoutDashboard, label: 'Staffing' },
+  { href: '/support', icon: BookOpen, label: 'Support' },
   { href: '/suggestions', icon: MessageSquareText, label: 'Suggestions' },
   { href: '/stats', icon: TrendingUp, label: 'Stats' },
   { href: '/survey', icon: MessageSquareText, label: 'Survey' },
@@ -39,6 +40,7 @@ const allNavItems: NavItem[] = [
 
 const managerNavItems: NavItem[] = [
   { href: '/staffing', icon: LayoutDashboard, label: 'Staffing' },
+  { href: '/support', icon: BookOpen, label: 'Support' },
   { href: '/stats', icon: TrendingUp, label: 'Stats' },
   { href: '/survey', icon: MessageSquareText, label: 'Survey' },
   { href: '/productivity', icon: BarChart3, label: 'Productivity' },
@@ -54,6 +56,7 @@ const managerNavItems: NavItem[] = [
 
 const agentNavItems: NavItem[] = [
   { href: '/agent', icon: LayoutDashboard, label: 'Agent' },
+  { href: '/support', icon: BookOpen, label: 'Support' },
   { href: '/suggestions', icon: MessageSquareText, label: 'Suggestions' },
   { href: '/stats', icon: TrendingUp, label: 'Stats' },
   { href: '/survey', icon: MessageSquareText, label: 'Survey' },

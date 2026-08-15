@@ -26,15 +26,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Authentication required' }, { status: 401 })
     }
 
-    const role = user.role?.trim().toLowerCase() || ''
-    const teamLeader = ['team leader', 'supervisor'].includes(role) ? user.name?.trim() : null
-    let query = supabaseAdmin
+    const { data, error } = await supabaseAdmin
       .from('agents')
       .select('name, team_leader, role, off_1, off_2, start_shift, end_shift, present')
       .order('name', { ascending: true })
-
-    if (teamLeader) query = query.ilike('team_leader', teamLeader)
-    const { data, error } = await query
 
     if (error) throw error
 

@@ -56,8 +56,6 @@ export async function GET(request: NextRequest) {
 
     const report = await getProductivityReport({
       shiftDate,
-      requesterRole: user.role,
-      requesterName: user.name || '',
     })
     const pdf = await generateProductivityReportPdf(report)
     const filename = `productivity-report-${shiftDate}.pdf`

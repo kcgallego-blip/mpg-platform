@@ -42,9 +42,6 @@ export async function GET(request: NextRequest) {
     const requestedAgent = request.nextUrl.searchParams.get('agent')?.trim() || null
     const normalizedRole = user.role?.trim().toLowerCase() || ''
     const agent = normalizedRole === 'agent' ? user.email : requestedAgent
-    const teamLeader = ['team leader', 'supervisor'].includes(normalizedRole)
-      ? user.name?.trim() || null
-      : null
     if (!DATE_KEY_PATTERN.test(shiftDate)) {
       return NextResponse.json({ error: 'Invalid shift date' }, { status: 400, headers: noStoreHeaders })
     }
@@ -53,7 +50,7 @@ export async function GET(request: NextRequest) {
       p_shift_date: shiftDate,
       p_status: status,
       p_agent: agent,
-      p_team_leader: teamLeader,
+      p_team_leader: null,
     })
 
     if (error) throw new Error(`Productivity aggregation is unavailable: ${error.message}`)
