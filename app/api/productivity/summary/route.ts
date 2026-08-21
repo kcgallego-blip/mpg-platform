@@ -107,6 +107,7 @@ export async function GET(request: NextRequest) {
         tphAverage: metrics.tph,
         shiftDuration: metrics.formattedNetDuration,
         shiftDurationMs: metrics.netDurationMinutes * 60_000,
+        rawDurationMs: metrics.rawDurationMinutes * 60_000,
         source: 'tph' as const,
       }
     })

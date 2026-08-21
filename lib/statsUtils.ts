@@ -299,7 +299,7 @@ export function formatStatValue(
     .replace(/\*/g, '')
     .toLowerCase()
 
-  if (normalizedFieldName === 'nps_score') {
+  if (['nps_score', 'tph'].includes(normalizedFieldName || '')) {
     const numValue = typeof value === 'string' ? parseFloat(value) : value
     if (!isNaN(numValue as number)) return String(Math.round(numValue as number))
   }

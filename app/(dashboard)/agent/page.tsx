@@ -37,7 +37,7 @@ type ProductivitySummaryAgent = {
   statusCounts: Record<string, number>
   hourlyCounts: Record<string, number>
   tphAverage: number
-  shiftDuration: string
+  rawDurationMs: number
 }
 
 type ProductivitySummaryResponse = {
@@ -55,6 +55,7 @@ type ProductivityTicketResponse = {
 
 const AGENT_DASHBOARD_CACHE_TTL_MS = 60 * 1000
 const AGENT_TICKET_PAGE_SIZE = 50
+const TPH_VISIBILITY_MINIMUM_MINUTES = 120
 
 const STATUS_LANES = [
   { key: 'Open', title: 'Open', color: 'border-red-300', header: 'bg-red-50', icon: 'bg-red-100 text-red-700', count: 'bg-red-100 text-red-800' },
@@ -211,9 +212,11 @@ export default function AgentPage() {
   const [hourlyCounts, setHourlyCounts] = useState<Record<string, number>>({})
   const [ticketPage, setTicketPage] = useState(1)
   const [totalTicketRows, setTotalTicketRows] = useState(0)
-  const [currentMetrics, setCurrentMetrics] = useState<{ tph: number; formattedNetDuration: string } | null>(null)
+  const [currentMetrics, setCurrentMetrics] = useState<{
+    tph: number
+    rawDurationMinutes: number
+  } | null>(null)
   const [dataSource, setDataSource] = useState<TphDataSource>('tph')
-  const [showHourlyBreakdown, setShowHourlyBreakdown] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [showNoNewTicketsModal, setShowNoNewTicketsModal] = useState(false)
@@ -354,7 +357,7 @@ export default function AgentPage() {
       setTotalTicketRows(ticketResponse.total || 0)
       setCurrentMetrics(agentSummary ? {
         tph: agentSummary.tphAverage,
-        formattedNetDuration: agentSummary.shiftDuration,
+        rawDurationMinutes: agentSummary.rawDurationMs / 60_000,
       } : null)
       setStatusCounts(nextStatusCounts)
       setHourlyCounts(nextHourlyCounts)
@@ -405,6 +408,7 @@ export default function AgentPage() {
     [activeHourlySlots, summaryTotalTickets]
   )
   const displayedMetrics = dataSource === 'tph' ? (currentMetrics || summaryMetrics) : summaryMetrics
+  const canShowTph = displayedMetrics.rawDurationMinutes >= TPH_VISIBILITY_MINIMUM_MINUTES
   const totalTicketPages = Math.max(1, Math.ceil(totalTicketRows / AGENT_TICKET_PAGE_SIZE))
   const maxHourlyBarValue = useMemo(() => Math.max(1, ...Object.values(hourlyCounts)), [hourlyCounts])
 
@@ -469,22 +473,6 @@ export default function AgentPage() {
             Refresh
           </button>
 
-          {dataSource === 'tph' && (
-            <label className="flex min-h-11 items-center gap-3 rounded-lg border border-outline-variant bg-surface px-4 py-2 text-sm font-semibold text-on-surface shadow-sm transition hover:border-primary-container">
-              <Clock3 size={18} className="text-primary-container" />
-              <span>Hourly</span>
-              <input
-                type="checkbox"
-                checked={showHourlyBreakdown}
-                onChange={(event) => setShowHourlyBreakdown(event.target.checked)}
-                className="sr-only"
-                aria-label="Toggle hourly ticket breakdown"
-              />
-              <span className={`relative h-6 w-11 rounded-full transition ${showHourlyBreakdown ? 'bg-primary-container' : 'bg-outline-variant'}`}>
-                <span className={`absolute top-1 h-4 w-4 rounded-full bg-white transition ${showHourlyBreakdown ? 'left-6' : 'left-1'}`} />
-              </span>
-            </label>
-          )}
         </div>
       </div>
 
@@ -503,10 +491,13 @@ export default function AgentPage() {
                 <Gauge size={18} className="text-primary-container" />
               <p className="text-label-md font-semibold uppercase">TPH</p>
               </div>
-              <p className="mt-3 font-hanken text-headline-md font-bold text-on-surface">{displayedMetrics.tph.toFixed(1)}</p>
-              <p className="mt-1 text-xs font-medium text-on-surface-variant">
-                {displayedMetrics.formattedNetDuration} net
-              </p>
+              {canShowTph ? (
+                <p className="mt-3 font-hanken text-headline-md font-bold text-on-surface">{displayedMetrics.tph.toFixed(1)}</p>
+              ) : (
+                <p className="mt-3 text-sm font-medium text-on-surface-variant">
+                  TPH will appear after managing few tickets
+                </p>
+              )}
             </div>
             <div className="rounded-lg border border-outline-variant/60 bg-surface/90 p-4">
               <div className="flex items-center gap-2 text-on-surface-variant">
@@ -564,22 +555,20 @@ export default function AgentPage() {
         </>
       ) : (
         <>
-          {showHourlyBreakdown && (
-            <section className="rounded-lg border border-outline-variant/60 bg-surface/90 p-4">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <BarChart3 size={18} className="text-primary-container" />
-                  <h2 className="font-hanken text-body-md font-bold text-on-surface">Hourly Breakdown</h2>
-                </div>
-                <div className="rounded-full border border-outline-variant/60 bg-surface px-3 py-1 text-sm font-semibold text-on-surface">
-                  Max: {maxHourlyBarValue}
-                </div>
+          <section className="rounded-lg border border-outline-variant/60 bg-surface/90 p-4">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <BarChart3 size={18} className="text-primary-container" />
+                <h2 className="font-hanken text-body-md font-bold text-on-surface">Hourly Breakdown</h2>
               </div>
-              <HourlyBarChart values={hourlyCounts} maxValue={maxHourlyBarValue} />
-            </section>
-          )}
+              <div className="rounded-full border border-outline-variant/60 bg-surface px-3 py-1 text-sm font-semibold text-on-surface">
+                Max: {maxHourlyBarValue}
+              </div>
+            </div>
+            <HourlyBarChart values={hourlyCounts} maxValue={maxHourlyBarValue} />
+          </section>
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             <div className="rounded-lg border border-outline-variant/60 bg-surface/90 p-4">
               <div className="flex items-center gap-2 text-on-surface-variant">
                 <Sigma size={18} className="text-primary-container" />
@@ -592,14 +581,13 @@ export default function AgentPage() {
                 <Gauge size={18} className="text-primary-container" />
                 <p className="text-label-md font-semibold uppercase">TPH</p>
               </div>
-              <p className="mt-3 font-hanken text-headline-md font-bold text-on-surface">{displayedMetrics.tph.toFixed(1)}</p>
-            </div>
-            <div className="rounded-lg border border-outline-variant/60 bg-surface/90 p-4">
-              <div className="flex items-center gap-2 text-on-surface-variant">
-                <Clock3 size={18} className="text-primary-container" />
-                <p className="text-label-md font-semibold uppercase">Duration</p>
-              </div>
-              <p className="mt-3 font-hanken text-headline-md font-bold text-on-surface">{displayedMetrics.formattedNetDuration}</p>
+              {canShowTph ? (
+                <p className="mt-3 font-hanken text-headline-md font-bold text-on-surface">{displayedMetrics.tph.toFixed(1)}</p>
+              ) : (
+                <p className="mt-3 text-sm font-medium text-on-surface-variant">
+                  TPH will appear after managing few tickets
+                </p>
+              )}
             </div>
             <div className="rounded-lg border border-outline-variant/60 bg-surface/90 p-4">
               <div className="flex items-center gap-2 text-on-surface-variant">

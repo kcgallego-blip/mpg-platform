@@ -348,9 +348,7 @@ export default function StatsPage() {
         key={`${fieldName}-${value}`}
         className="whitespace-nowrap px-4 py-3 text-sm"
       >
-        {isNA ? (
-          <span className="text-on-surface-variant">—</span>
-        ) : passing ? (
+        {passing ? (
           <span className={`inline-flex items-center rounded-full px-3 py-1.5 font-semibold ${colorClass}`}>
             {formattedValue}
           </span>
