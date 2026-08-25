@@ -77,7 +77,7 @@ export default function ControlsPage() {
 
       <section
         aria-labelledby="feature-toggles-heading"
-        className="overflow-hidden rounded-2xl border border-outline/20 bg-white/80 shadow-sm backdrop-blur-sm"
+        className="overflow-hidden rounded-2xl border border-outline/20 bg-surface/80 shadow-sm backdrop-blur-sm"
       >
         <div className="border-b border-outline/15 bg-surface-container-low/60 px-6 py-5">
           <h2
@@ -116,7 +116,7 @@ export default function ControlsPage() {
           >
             <span
               aria-hidden="true"
-              className={`h-6 w-6 rounded-full bg-white shadow-sm transition-transform ${
+              className={`h-6 w-6 rounded-full bg-surface shadow-sm transition-transform ${
                 isReady && attendanceRouteEnabled ? 'translate-x-7' : 'translate-x-1'
               }`}
             />
@@ -148,7 +148,7 @@ export default function ControlsPage() {
           >
             <span
               aria-hidden="true"
-              className={`h-6 w-6 rounded-full bg-white shadow-sm transition-transform ${
+              className={`h-6 w-6 rounded-full bg-surface shadow-sm transition-transform ${
                 isReady && productivityReportEnabled ? 'translate-x-7' : 'translate-x-1'
               }`}
             />

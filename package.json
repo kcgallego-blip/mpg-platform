@@ -1,14 +1,16 @@
 {
   "name": "mpg-platform",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Masterpiece Group Analytics & Reports Platform",
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "npm run changelog:validate && next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "node --experimental-strip-types --test tests/agentMetrics.test.ts tests/productivityReport.test.ts tests/agentsImport.test.ts tests/ticketTime.test.ts tests/statsIdentity.test.ts tests/statsUtils.test.ts tests/surveyImport.test.ts tests/support.test.ts",
-    "type-check": "tsc --noEmit"
+    "test": "node --experimental-strip-types --test tests/agentMetrics.test.ts tests/productivityReport.test.ts tests/agentsImport.test.ts tests/ticketTime.test.ts tests/statsIdentity.test.ts tests/statsUtils.test.ts tests/surveyImport.test.ts tests/support.test.ts tests/changelog.test.ts tests/theme.test.ts",
+    "type-check": "tsc --noEmit",
+    "changelog:lock": "node --experimental-strip-types scripts/updateChangelogLock.ts",
+    "changelog:validate": "node --experimental-strip-types scripts/validateChangelogs.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

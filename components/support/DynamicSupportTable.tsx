@@ -34,7 +34,7 @@ export default function DynamicSupportTable({ category, rows, actions, selection
 
   if (rows.length === 0) {
     return (
-      <div className="flex min-h-[300px] flex-col items-center justify-center rounded-xl border border-dashed border-outline-variant bg-white/60 px-6 text-center">
+      <div className="flex min-h-[300px] flex-col items-center justify-center rounded-xl border border-dashed border-outline-variant bg-surface/60 px-6 text-center">
         <Database size={34} className="mb-3 text-outline" />
         <h2 className="font-hanken text-lg font-semibold text-on-surface">No matching reference rows</h2>
         <p className="mt-1 text-sm text-on-surface-variant">Try another search or choose a different category.</p>
@@ -43,7 +43,7 @@ export default function DynamicSupportTable({ category, rows, actions, selection
   }
 
   return (
-    <div className="overflow-hidden rounded-xl border border-outline-variant bg-white shadow-sm">
+    <div className="overflow-hidden rounded-xl border border-outline-variant bg-surface shadow-sm">
       <div className="max-h-[calc(100vh-270px)] overflow-auto">
         <table className="min-w-full border-separate border-spacing-0 text-left text-sm">
           <thead className="sticky top-0 z-10 bg-surface-container-low">
@@ -73,7 +73,7 @@ export default function DynamicSupportTable({ category, rows, actions, selection
           </thead>
           <tbody>
             {rows.map((row, rowIndex) => (
-              <tr key={row.id} className={selection?.selectedRowIds.has(row.id) ? 'bg-blue-50' : rowIndex % 2 ? 'bg-surface-container-low/30' : 'bg-white'}>
+              <tr key={row.id} className={selection?.selectedRowIds.has(row.id) ? 'bg-info-container' : rowIndex % 2 ? 'bg-surface-container-low/30' : 'bg-surface'}>
                 {selection && (
                   <td className="w-12 border-b border-outline-variant/70 px-4 py-3 align-top">
                     <input
@@ -102,7 +102,7 @@ export default function DynamicSupportTable({ category, rows, actions, selection
                         >
                           <span>{value || <span className="text-outline">—</span>}</span>
                           {value && (copiedCell === cellId
-                            ? <Check size={14} className="mt-0.5 shrink-0 text-emerald-600" />
+                            ? <Check size={14} className="mt-0.5 shrink-0 text-success" />
                             : <Clipboard size={14} className="mt-0.5 shrink-0 opacity-0 transition group-hover:opacity-100" />)}
                         </button>
                       ) : <span style={{ color: format.color, fontWeight: format.bold ? 700 : undefined, fontStyle: format.italic ? 'italic' : undefined }}>{value || <span className="text-outline">—</span>}</span>}

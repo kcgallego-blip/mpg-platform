@@ -14,10 +14,10 @@ export default function SupportSecondaryHeader({ categories, activeCategoryId, o
     .slice(0, 4)
 
   return (
-    <section className="sticky top-20 z-30 -mx-gutter border-b border-outline-variant bg-white/95 px-gutter py-3 shadow-sm backdrop-blur-glass-md">
+    <section className="sticky top-20 z-30 -mx-gutter border-b border-outline-variant bg-surface/95 px-gutter py-3 shadow-sm backdrop-blur-glass-md">
       <div className="mx-auto flex max-w-[1440px] flex-nowrap items-center gap-3">
         <div className="mr-2 flex min-w-fit items-center gap-2">
-          <div className="rounded-lg bg-primary-container p-2 text-white">
+          <div className="rounded-lg bg-primary-container p-2 text-on-primary-container">
             <BookOpen size={19} />
           </div>
           <div>
@@ -53,8 +53,8 @@ export default function SupportSecondaryHeader({ categories, activeCategoryId, o
                   aria-pressed={active}
                   className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
                     active
-                      ? 'border-primary-container bg-primary-container text-white'
-                      : 'border-outline-variant bg-white text-on-surface-variant hover:border-primary-container hover:text-primary-container'
+                      ? 'border-primary-container bg-primary-container text-on-primary-container'
+                      : 'border-outline-variant bg-surface text-on-surface-variant hover:border-primary-container hover:text-primary-container'
                   }`}
                 >
                   {category.name}

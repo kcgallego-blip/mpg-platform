@@ -87,6 +87,7 @@ export interface Database {
           avatar_image: string | null
           created_at: string
           updated_at: string
+          last_seen_changelog_sequence: number
         }
         Insert: {
           id?: string
@@ -96,6 +97,7 @@ export interface Database {
           avatar_image?: string | null
           created_at?: string
           updated_at?: string
+          last_seen_changelog_sequence?: number
         }
         Update: {
           id?: string
@@ -104,6 +106,7 @@ export interface Database {
           name?: string | null
           avatar_image?: string | null
           updated_at?: string
+          last_seen_changelog_sequence?: number
         }
       }
       suggestions: {
@@ -485,6 +488,10 @@ export interface Database {
           p_delete_names?: string[]
         }
         Returns: Json
+      }
+      acknowledge_changelog: {
+        Args: { p_user_email: string; p_sequence: number }
+        Returns: number
       }
     }
   }

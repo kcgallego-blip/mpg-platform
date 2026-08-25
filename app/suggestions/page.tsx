@@ -140,7 +140,7 @@ export default function SuggestionsPage() {
   if (role === 'Unauthorized') {
     return (
       <div className="flex min-h-[520px] items-center justify-center">
-        <div className="max-w-md rounded-2xl border border-error/20 bg-white/80 p-8 text-center shadow-sm">
+        <div className="max-w-md rounded-2xl border border-error/20 bg-surface/80 p-8 text-center shadow-sm">
           <ShieldX size={40} className="mx-auto mb-4 text-error" />
           <h1 className="font-hanken text-2xl font-bold text-on-surface">Unauthorized</h1>
           <p className="mt-2 text-sm text-on-surface-variant">
@@ -184,7 +184,7 @@ export default function SuggestionsPage() {
       {role === 'Agent' ? (
         <form
           onSubmit={handleSubmit}
-          className="rounded-2xl border border-outline-variant/60 bg-white/90 p-6 shadow-sm"
+          className="rounded-2xl border border-outline-variant/60 bg-surface/90 p-6 shadow-sm"
         >
           <label htmlFor="suggestion" className="font-hanken text-lg font-bold text-on-surface">
             Your suggestion
@@ -201,7 +201,7 @@ export default function SuggestionsPage() {
             maxLength={SUGGESTION_MAX_LENGTH}
             disabled={isSubmitting}
             placeholder="Describe your suggestion..."
-            className="mt-4 w-full resize-y rounded-xl border border-outline-variant bg-white px-4 py-3 text-on-surface outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-60"
+            className="mt-4 w-full resize-y rounded-xl border border-outline-variant bg-surface px-4 py-3 text-on-surface outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-60"
           />
           <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <span id="suggestion-count" className="text-sm text-on-surface-variant">
@@ -218,7 +218,7 @@ export default function SuggestionsPage() {
           </div>
         </form>
       ) : (
-        <section className="overflow-hidden rounded-2xl border border-outline-variant/60 bg-white/90 shadow-sm">
+        <section className="overflow-hidden rounded-2xl border border-outline-variant/60 bg-surface/90 shadow-sm">
           {suggestions.length === 0 ? (
             <div className="flex min-h-[320px] flex-col items-center justify-center p-8 text-center">
               <Inbox size={40} className="mb-4 text-on-surface-variant" />
@@ -267,9 +267,9 @@ export default function SuggestionsPage() {
       {toast && (
         <div
           role={toast.kind === 'error' ? 'alert' : 'status'}
-          className={`fixed bottom-6 right-6 z-[60] flex max-w-sm items-center gap-3 rounded-xl border bg-white px-4 py-3 shadow-lg ${
+          className={`fixed bottom-6 right-6 z-[60] flex max-w-sm items-center gap-3 rounded-xl border bg-surface px-4 py-3 shadow-lg ${
             toast.kind === 'success'
-              ? 'border-emerald-200 text-emerald-700'
+              ? 'border-success/30 text-success'
               : 'border-error/30 text-error'
           }`}
         >

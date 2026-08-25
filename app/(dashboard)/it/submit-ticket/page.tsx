@@ -257,7 +257,7 @@ function AgentSelector({
           </p>
         </div>
         {item.agentNames.length > 0 && (
-          <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-700">
+          <span className="rounded-full bg-success-container px-3 py-1 text-xs font-medium text-on-success-container">
             {item.agentNames.length} selected
           </span>
         )}
@@ -273,7 +273,7 @@ function AgentSelector({
             {item.agentNames.map((agent) => (
               <div
                 key={agent}
-                className="flex items-center gap-1 px-3 py-1 rounded-full bg-green-100 text-green-700 border border-green-200 text-sm"
+                className="flex items-center gap-1 px-3 py-1 rounded-full bg-success-container text-on-success-container border border-success/30 text-sm"
               >
                 {agent}
                 <button

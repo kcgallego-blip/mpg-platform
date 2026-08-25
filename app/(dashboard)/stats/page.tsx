@@ -329,7 +329,7 @@ export default function StatsPage() {
 
   const getScoreColor = (fieldName: string, value: string | number | null | undefined) => {
     if (isNAField(fieldName)) return ''
-    if (isScorePassing(fieldName, value)) return 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+    if (isScorePassing(fieldName, value)) return 'bg-success-container text-on-success-container border border-success/30'
     return ''
   }
 
@@ -365,8 +365,8 @@ export default function StatsPage() {
       return { label: 'Not available yet', className: 'bg-surface-container text-on-surface-variant border border-outline-variant' }
     }
     if (isNAField(fieldName)) return { label: 'N/A', className: 'bg-surface-container text-on-surface-variant border border-outline-variant' }
-    if (isScorePassing(fieldName, value)) return { label: 'Passing', className: 'bg-green-100 text-green-700 border border-green-200' }
-    return { label: 'Below Target', className: 'bg-red-50 text-red-700 border border-red-200' }
+    if (isScorePassing(fieldName, value)) return { label: 'Passing', className: 'bg-success-container text-on-success-container border border-success/30' }
+    return { label: 'Below Target', className: 'bg-error-container text-on-error-container border border-error/30' }
   }
 
   const formatAgentMetricValue = (fieldName: string, value: string | number | null | undefined) => {
@@ -710,7 +710,7 @@ export default function StatsPage() {
                                   <p className="text-sm font-bold uppercase tracking-[0.16em] text-on-primary-container">
                                     {metric.label}
                                   </p>
-                                  <p className="mt-1 text-xs text-white/80">
+                                  <p className="mt-1 text-xs text-on-primary-container/80">
                                     {metric.description}
                                   </p>
                                 </div>
@@ -720,7 +720,7 @@ export default function StatsPage() {
                                   </span>
                                 )}
                               </div>
-                              <div className={`mt-5 break-words text-4xl font-black tracking-tight sm:text-5xl ${status.label === 'Below Target' ? 'text-red-200' : 'text-white'}`}>
+                              <div className={`mt-5 break-words text-4xl font-black tracking-tight sm:text-5xl ${status.label === 'Below Target' ? 'text-red-200' : 'text-on-primary-container'}`}>
                                 {formattedValue}
                               </div>
                             </div>
@@ -748,7 +748,7 @@ export default function StatsPage() {
                                   </span>
                                 )}
                               </div>
-                              <div className={`mt-4 text-2xl font-bold tracking-tight sm:text-3xl ${status.label === 'Below Target' ? 'text-red-600' : 'text-on-surface'}`}>
+                              <div className={`mt-4 text-2xl font-bold tracking-tight sm:text-3xl ${status.label === 'Below Target' ? 'text-error' : 'text-on-surface'}`}>
                                 {formattedValue}
                               </div>
                             </div>
@@ -772,7 +772,7 @@ export default function StatsPage() {
                                 </span>
                               )}
                             </div>
-                            <div className={`mt-3 text-lg font-semibold ${status.label === 'Below Target' ? 'text-red-600' : 'text-on-surface'}`}>
+                            <div className={`mt-3 text-lg font-semibold ${status.label === 'Below Target' ? 'text-error' : 'text-on-surface'}`}>
                               {formattedValue}
                             </div>
                           </div>
@@ -845,7 +845,7 @@ export default function StatsPage() {
         <p className="text-sm font-medium text-on-surface">Legend:</p>
         <div className="flex flex-wrap gap-4">
           <div className="flex items-center gap-2">
-            <div className="inline-block rounded-full bg-green-100 px-3 py-1 text-green-700">
+            <div className="inline-block rounded-full bg-success-container px-3 py-1 text-on-success-container">
               Passing
             </div>
             <span className="text-sm text-on-surface-variant">Score meets requirements</span>

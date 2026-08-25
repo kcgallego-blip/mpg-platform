@@ -83,6 +83,7 @@ export type Database = {
           is_active: boolean | null
           last_login: string | null
           token: string | null
+          last_seen_changelog_sequence: number
         }
         Insert: {
           email: string
@@ -95,6 +96,7 @@ export type Database = {
           is_active?: boolean | null
           last_login?: string | null
           token?: string | null
+          last_seen_changelog_sequence?: number
         }
         Update: {
           name?: string | null
@@ -105,6 +107,7 @@ export type Database = {
           is_active?: boolean | null
           last_login?: string | null
           token?: string | null
+          last_seen_changelog_sequence?: number
         }
       }
       suggestions: {
@@ -431,6 +434,10 @@ export type Database = {
           p_delete_names?: string[]
         }
         Returns: Json
+      }
+      acknowledge_changelog: {
+        Args: { p_user_email: string; p_sequence: number }
+        Returns: number
       }
     }
   }

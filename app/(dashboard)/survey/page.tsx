@@ -41,9 +41,9 @@ type Notification = {
 }
 
 const CSAT_GROUPS = [
-  { value: 'Unsatisfied' as const, title: 'Unsatisfied', emoji: '😡', accent: 'border-red-200 bg-red-50/70' },
-  { value: 'Neutral' as const, title: 'Neutral', emoji: '😐', accent: 'border-amber-200 bg-amber-50/70' },
-  { value: 'Satisfied' as const, title: 'Satisfied', emoji: '😊', accent: 'border-emerald-200 bg-emerald-50/70' },
+  { value: 'Unsatisfied' as const, title: 'Unsatisfied', emoji: '😡', accent: 'border-error/30 bg-error-container/70' },
+  { value: 'Neutral' as const, title: 'Neutral', emoji: '😐', accent: 'border-warning/30 bg-warning-container/70' },
+  { value: 'Satisfied' as const, title: 'Satisfied', emoji: '😊', accent: 'border-success/30 bg-success-container/70' },
 ]
 const TABLE_PAGE_SIZE = 50
 const SURVEY_CACHE_TTL_MS = 10 * 60 * 1000

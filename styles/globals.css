@@ -4,6 +4,135 @@
 
 @import url('https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
 
+:root {
+  --color-surface: 255 255 255;
+  --color-surface-dim: 248 250 252;
+  --color-surface-bright: 255 255 255;
+  --color-surface-container-lowest: 255 255 255;
+  --color-surface-container-low: 241 245 249;
+  --color-surface-container: 226 232 240;
+  --color-surface-container-high: 203 213 225;
+  --color-surface-container-highest: 148 163 184;
+  --color-on-surface: 15 23 42;
+  --color-on-surface-variant: 71 85 105;
+  --color-inverse-surface: 241 245 249;
+  --color-inverse-on-surface: 30 41 59;
+  --color-outline: 148 163 184;
+  --color-outline-variant: 226 232 240;
+  --color-surface-tint: 175 198 255;
+  --color-primary: 175 198 255;
+  --color-on-primary: 8 46 104;
+  --color-primary-container: 52 81 141;
+  --color-primary-container-foreground: 52 81 141;
+  --color-on-primary-container: 226 234 255;
+  --color-inverse-primary: 65 93 154;
+  --color-secondary: 175 198 255;
+  --color-on-secondary: 0 45 108;
+  --color-secondary-container: 19 68 144;
+  --color-secondary-container-foreground: 19 68 144;
+  --color-on-secondary-container: 219 229 255;
+  --color-tertiary: 100 116 139;
+  --color-on-tertiary: 255 255 255;
+  --color-tertiary-container: 241 245 249;
+  --color-on-tertiary-container: 15 23 42;
+  --color-background: 255 255 255;
+  --color-on-background: 15 23 42;
+  --color-surface-variant: 226 232 240;
+  --color-error: 220 38 38;
+  --color-on-error: 255 255 255;
+  --color-error-container: 254 226 226;
+  --color-on-error-container: 153 27 27;
+  --color-success: 22 163 74;
+  --color-on-success: 255 255 255;
+  --color-success-container: 220 252 231;
+  --color-on-success-container: 22 101 52;
+  --color-warning: 217 119 6;
+  --color-on-warning: 255 255 255;
+  --color-warning-container: 254 243 199;
+  --color-on-warning-container: 146 64 14;
+  --color-info: 2 132 199;
+  --color-on-info: 255 255 255;
+  --color-info-container: 224 242 254;
+  --color-on-info-container: 7 89 133;
+  --glass-background: 52 81 141;
+  --glass-opacity: 0.08;
+  --page-gradient-middle: 239 246 255;
+}
+
+:root[data-theme='dark'] {
+  --color-surface: 15 23 42;
+  --color-surface-dim: 2 6 23;
+  --color-surface-bright: 51 65 85;
+  --color-surface-container-lowest: 2 6 23;
+  --color-surface-container-low: 17 24 39;
+  --color-surface-container: 30 41 59;
+  --color-surface-container-high: 51 65 85;
+  --color-surface-container-highest: 71 85 105;
+  --color-on-surface: 248 250 252;
+  --color-on-surface-variant: 203 213 225;
+  --color-inverse-surface: 241 245 249;
+  --color-inverse-on-surface: 30 41 59;
+  --color-outline: 100 116 139;
+  --color-outline-variant: 51 65 85;
+  --color-surface-tint: 175 198 255;
+  --color-primary: 175 198 255;
+  --color-on-primary: 8 46 104;
+  --color-primary-container: 40 68 126;
+  --color-primary-container-foreground: 175 198 255;
+  --color-on-primary-container: 226 234 255;
+  --color-inverse-primary: 65 93 154;
+  --color-secondary: 183 202 255;
+  --color-on-secondary: 0 45 108;
+  --color-secondary-container: 34 75 142;
+  --color-secondary-container-foreground: 183 202 255;
+  --color-on-secondary-container: 219 229 255;
+  --color-tertiary: 148 163 184;
+  --color-on-tertiary: 15 23 42;
+  --color-tertiary-container: 51 65 85;
+  --color-on-tertiary-container: 241 245 249;
+  --color-background: 8 15 30;
+  --color-on-background: 248 250 252;
+  --color-surface-variant: 51 65 85;
+  --color-error: 248 113 113;
+  --color-on-error: 69 10 10;
+  --color-error-container: 127 29 29;
+  --color-on-error-container: 254 226 226;
+  --color-success: 74 222 128;
+  --color-on-success: 5 46 22;
+  --color-success-container: 20 83 45;
+  --color-on-success-container: 220 252 231;
+  --color-warning: 251 191 36;
+  --color-on-warning: 69 26 3;
+  --color-warning-container: 120 53 15;
+  --color-on-warning-container: 254 243 199;
+  --color-info: 125 211 252;
+  --color-on-info: 8 47 73;
+  --color-info-container: 12 74 110;
+  --color-on-info-container: 224 242 254;
+  --glass-background: 148 163 184;
+  --glass-opacity: 0.1;
+  --page-gradient-middle: 18 31 56;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+    --color-surface: 15 23 42;
+    --color-surface-dim: 2 6 23;
+    --color-surface-container-lowest: 2 6 23;
+    --color-surface-container-low: 17 24 39;
+    --color-surface-container: 30 41 59;
+    --color-surface-container-high: 51 65 85;
+    --color-on-surface: 248 250 252;
+    --color-on-surface-variant: 203 213 225;
+    --color-background: 8 15 30;
+    --color-on-background: 248 250 252;
+    --color-outline: 100 116 139;
+    --color-outline-variant: 51 65 85;
+    --page-gradient-middle: 18 31 56;
+  }
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -15,11 +144,12 @@ body {
   width: 100%;
   height: 100%;
   font-family: 'Inter', sans-serif;
+  background-color: rgb(var(--color-background));
+  color: rgb(var(--color-on-surface));
 }
 
-/* Glassmorphism utility - WHITE MODE with original blue branding */
 .glass-effect {
-  background: rgba(52, 81, 141, 0.08);
+  background: rgb(var(--glass-background) / var(--glass-opacity));
   backdrop-filter: blur(12px);
   border: none;
 }
@@ -30,7 +160,40 @@ body {
 
 .glass-effect-hover:hover {
   backdrop-filter: blur(16px);
-  box-shadow: 0 8px 32px 0 rgba(52, 81, 141, 0.12);
+  box-shadow: 0 8px 32px 0 rgb(var(--color-primary-container) / 0.18);
+}
+
+.app-page-gradient {
+  background-image: linear-gradient(
+    to bottom right,
+    rgb(var(--color-background)),
+    rgb(var(--page-gradient-middle) / 0.42),
+    rgb(var(--color-background))
+  );
+}
+
+/* Container colors remain deep enough for branded backgrounds in dark mode,
+   while their legacy foreground utility receives a readable accent value. */
+:root[data-theme='dark'] .text-primary-container,
+:root[data-theme='dark'] .hover\:text-primary-container:hover {
+  color: rgb(var(--color-primary-container-foreground) / var(--tw-text-opacity, 1));
+}
+
+:root[data-theme='dark'] .text-secondary-container {
+  color: rgb(var(--color-secondary-container-foreground) / var(--tw-text-opacity, 1));
+}
+
+:root[data-theme='dark'] .group:hover .group-hover\:text-inverse-primary {
+  color: rgb(var(--color-primary-container-foreground) / var(--tw-text-opacity, 1));
+}
+
+html.theme-transition,
+html.theme-transition *,
+html.theme-transition *::before,
+html.theme-transition *::after {
+  transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, box-shadow, opacity, transform !important;
+  transition-duration: 250ms !important;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1) !important;
 }
 
 /* Smooth scrolling */
@@ -66,24 +229,22 @@ html {
   animation-delay: 4s;
 }
 
-/* Selection styling - adapted for white mode with blue accent */
 ::selection {
-  background-color: #34518d;
-  color: #ffffff;
+  background-color: rgb(var(--color-primary-container));
+  color: rgb(var(--color-on-primary-container));
 }
 
-/* Custom scrollbar - white mode with blue accent */
 ::-webkit-scrollbar-track {
-  background: #f1f5f9;
+  background: rgb(var(--color-surface-container-low));
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #34518d;
+  background: rgb(var(--color-primary-container));
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #afc6ff;
+  background: rgb(var(--color-primary));
 }
 
 .scrollbar-hidden {
@@ -93,4 +254,13 @@ html {
 
 .scrollbar-hidden::-webkit-scrollbar {
   display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.theme-transition,
+  html.theme-transition *,
+  html.theme-transition *::before,
+  html.theme-transition *::after {
+    transition-duration: 0.01ms !important;
+  }
 }

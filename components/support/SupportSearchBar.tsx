@@ -10,7 +10,7 @@ type Props = {
 
 export default function SupportSearchBar({ value, onChange, categoryName, resultCount, totalCount }: Props) {
   return (
-    <div className="sticky top-[145px] z-20 -mx-gutter border-b border-outline-variant/70 bg-white/90 px-gutter py-3 backdrop-blur-glass-md">
+    <div className="sticky top-[145px] z-20 -mx-gutter border-b border-outline-variant/70 bg-surface/90 px-gutter py-3 backdrop-blur-glass-md">
       <div className="mx-auto flex max-w-[1440px] flex-wrap items-center gap-3">
         <label className="relative min-w-[260px] flex-1">
           <span className="sr-only">Search {categoryName}</span>
@@ -21,7 +21,7 @@ export default function SupportSearchBar({ value, onChange, categoryName, result
             value={value}
             onChange={event => onChange(event.target.value)}
             placeholder={`Search ${categoryName}...`}
-            className="w-full rounded-xl border border-outline-variant bg-white py-2.5 pl-11 pr-11 text-sm text-on-surface shadow-sm outline-none transition placeholder:text-outline focus:border-primary-container focus:ring-2 focus:ring-primary/40"
+            className="w-full rounded-xl border border-outline-variant bg-surface py-2.5 pl-11 pr-11 text-sm text-on-surface shadow-sm outline-none transition placeholder:text-outline focus:border-primary-container focus:ring-2 focus:ring-primary/40"
           />
           {value && (
             <button

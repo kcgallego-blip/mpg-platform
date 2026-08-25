@@ -57,7 +57,7 @@ export default function CategoryDefinitionForm({ category, existingCategories, b
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/35 p-4 backdrop-blur-sm">
-      <form onSubmit={submit} className="max-h-[90vh] w-full max-w-3xl overflow-auto rounded-2xl border border-outline-variant bg-white p-6 shadow-2xl">
+      <form onSubmit={submit} className="max-h-[90vh] w-full max-w-3xl overflow-auto rounded-2xl border border-outline-variant bg-surface p-6 shadow-2xl">
         <div className="flex items-start justify-between gap-4">
           <div><h2 className="font-hanken text-2xl font-bold text-on-surface">{category ? 'Edit category' : 'New category'}</h2><p className="mt-1 text-sm text-on-surface-variant">Define the table columns and how agents interact with them.</p></div>
           <button type="button" onClick={onCancel} className="rounded-lg p-2 text-on-surface-variant hover:bg-surface-container-low" aria-label="Close"><X size={20} /></button>
@@ -88,8 +88,8 @@ export default function CategoryDefinitionForm({ category, existingCategories, b
           <label className="text-xs font-semibold text-on-surface-variant">Quick tag order<input type="number" min={0} max={32767} value={quickAccessOrder} onChange={event => setQuickAccessOrder(Number(event.target.value))} disabled={!isQuickAccess} className="mt-1 w-full rounded-lg border border-outline-variant px-3 py-2 text-sm text-on-surface disabled:opacity-50" /></label>
           <label className="text-xs font-semibold text-on-surface-variant">Category order<input type="number" min={0} max={2147483647} value={sortOrder} onChange={event => setSortOrder(Number(event.target.value))} className="mt-1 w-full rounded-lg border border-outline-variant px-3 py-2 text-sm text-on-surface" /></label>
         </div>
-        {error && <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-error">{error}</p>}
-        <div className="mt-6 flex justify-end gap-3"><button type="button" onClick={onCancel} className="rounded-lg border border-outline-variant px-4 py-2 text-sm font-semibold">Cancel</button><button disabled={busy} className="rounded-lg bg-primary-container px-5 py-2 text-sm font-semibold text-white disabled:opacity-60">{busy ? 'Saving…' : 'Save category'}</button></div>
+        {error && <p className="mt-4 rounded-lg bg-error-container px-3 py-2 text-sm text-on-error-container">{error}</p>}
+        <div className="mt-6 flex justify-end gap-3"><button type="button" onClick={onCancel} className="rounded-lg border border-outline-variant px-4 py-2 text-sm font-semibold">Cancel</button><button disabled={busy} className="rounded-lg bg-primary-container px-5 py-2 text-sm font-semibold text-on-primary-container disabled:opacity-60">{busy ? 'Saving…' : 'Save category'}</button></div>
       </form>
     </div>
   )

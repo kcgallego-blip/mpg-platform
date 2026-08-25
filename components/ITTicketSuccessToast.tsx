@@ -53,14 +53,14 @@ export default function ITTicketSuccessToast() {
     <div
       role="status"
       aria-live="polite"
-      className="fixed left-4 right-4 top-24 z-[60] flex items-center gap-3 rounded-xl border border-emerald-200 bg-white px-4 py-3 text-emerald-700 shadow-lg sm:left-auto sm:right-6 sm:max-w-sm"
+      className="fixed left-4 right-4 top-24 z-[60] flex items-center gap-3 rounded-xl border border-success/30 bg-surface px-4 py-3 text-success shadow-lg sm:left-auto sm:right-6 sm:max-w-sm"
     >
       <CheckCircle2 size={20} className="shrink-0" />
       <span className="flex-1 text-sm font-medium">{message}</span>
       <button
         type="button"
         onClick={dismissToast}
-        className="rounded-full p-1 text-emerald-700 transition-colors hover:bg-emerald-100"
+        className="rounded-full p-1 text-success transition-colors hover:bg-success-container"
         aria-label="Close notification"
       >
         <X size={18} />

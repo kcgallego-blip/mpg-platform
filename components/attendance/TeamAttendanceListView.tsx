@@ -109,7 +109,7 @@ export default function TeamAttendanceListView({
             <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-on-surface-variant">
               Shift date
             </span>
-            <span className="flex items-center gap-2 rounded-lg border border-outline-variant/50 bg-white px-3 py-2">
+            <span className="flex items-center gap-2 rounded-lg border border-outline-variant/50 bg-surface px-3 py-2">
               <CalendarDays size={17} className="text-primary" />
               <input
                 type="date"
@@ -151,7 +151,7 @@ export default function TeamAttendanceListView({
           description={`No team logs were found for ${shiftDate}.`}
         />
       ) : (
-        <div className="overflow-hidden rounded-xl border border-outline-variant/30 bg-white/85 shadow-sm">
+        <div className="overflow-hidden rounded-xl border border-outline-variant/30 bg-surface/85 shadow-sm">
           <div className="flex items-center justify-between border-b border-outline-variant/30 bg-surface-container-low/70 px-4 py-2">
             <span className="text-xs font-semibold uppercase tracking-wide text-on-surface-variant">
               {records.length} agent{records.length === 1 ? '' : 's'}
@@ -180,7 +180,7 @@ export default function TeamAttendanceListView({
                 {records.map((record) => (
                   <tr
                     key={`${record.agent}-${record.shift_date}`}
-                    className="transition-colors hover:bg-blue-50/60"
+                    className="transition-colors hover:bg-info-container/60"
                   >
                     <td className="truncate px-4 py-2 text-sm font-medium text-on-surface" title={record.agent}>
                       {record.agent}
@@ -197,7 +197,7 @@ export default function TeamAttendanceListView({
 
       {copiedValue && (
         <div
-          className="fixed bottom-6 right-6 z-[70] flex items-center gap-2 rounded-lg bg-on-surface px-4 py-3 text-sm font-medium text-white shadow-xl"
+          className="fixed bottom-6 right-6 z-[70] flex items-center gap-2 rounded-lg bg-on-surface px-4 py-3 text-sm font-medium text-background shadow-xl"
           role="status"
           aria-live="polite"
         >

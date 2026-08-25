@@ -1,12 +1,14 @@
 'use client'
 
 import { ReactNode } from 'react'
+import { usePathname } from 'next/navigation'
 import Navigation from '@/components/Navigation'
 import ITTicketSuccessToast from '@/components/ITTicketSuccessToast'
 import { useRequireAuth } from '@/lib/useRequireAuth'
 
 export default function AuthenticatedLayout({ children }: { children: ReactNode }) {
   const { user, isReady } = useRequireAuth()
+  const pathname = usePathname()
 
   if (!isReady) {
     return (
@@ -21,7 +23,7 @@ export default function AuthenticatedLayout({ children }: { children: ReactNode 
 
   if (!user) return null
 
-  if (!user.role) {
+  if (!user.role && pathname !== '/changelogs' && pathname !== '/profile') {
     return (
       <div className="min-h-screen relative">
         <Navigation />
@@ -42,7 +44,7 @@ export default function AuthenticatedLayout({ children }: { children: ReactNode 
   return (
     <div className="min-h-screen relative">
       <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none">
-        <div className="absolute inset-0 bg-gradient-to-br from-white via-blue-50/20 to-white" />
+        <div className="app-page-gradient absolute inset-0" />
         <div className="absolute top-0 left-1/4 w-96 h-96 bg-primary-container/5 rounded-full blur-3xl animate-blob" />
         <div className="absolute top-1/3 right-1/4 w-80 h-80 bg-primary/10 rounded-full blur-3xl animate-blob animation-delay-2000" />
         <div className="absolute bottom-0 left-1/3 w-64 h-64 bg-inverse-primary/5 rounded-full blur-3xl animate-blob animation-delay-4000" />

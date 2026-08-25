@@ -111,7 +111,7 @@ export default function AgentCalendarView({ currentShiftDate }: AgentCalendarVie
           </p>
         </div>
 
-        <div className="inline-flex w-fit items-center rounded-xl border border-outline-variant/40 bg-white p-1 shadow-sm">
+        <div className="inline-flex w-fit items-center rounded-xl border border-outline-variant/40 bg-surface p-1 shadow-sm">
           <button
             type="button"
             onClick={() => moveMonth(-1)}
@@ -149,7 +149,7 @@ export default function AgentCalendarView({ currentShiftDate }: AgentCalendarVie
           onRetry={() => void loadAttendance()}
         />
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-outline-variant/30 bg-white/80 shadow-sm">
+        <div className="overflow-x-auto rounded-2xl border border-outline-variant/30 bg-surface/80 shadow-sm">
           <div className="min-w-[720px]">
             <div className="grid grid-cols-7 border-b border-outline-variant/30 bg-surface-container-low/70">
               {weekDays.map((day) => (
@@ -188,7 +188,7 @@ export default function AgentCalendarView({ currentShiftDate }: AgentCalendarVie
                     <article
                       key={dateKey}
                       className={`min-h-32 border-b border-r border-outline-variant/20 p-3 transition-colors ${
-                        isCurrent ? 'bg-primary/10 ring-2 ring-inset ring-primary/50' : 'hover:bg-blue-50/50'
+                        isCurrent ? 'bg-primary/10 ring-2 ring-inset ring-primary/50' : 'hover:bg-info-container/50'
                       }`}
                       aria-current={isCurrent ? 'date' : undefined}
                     >

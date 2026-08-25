@@ -394,10 +394,10 @@ export default function StaffingPage() {
       icon: <Clock size={18} />,
       agents: boardAgents.filter((agent) => agent.status === 'notLoggedIn'),
       color: {
-        border: 'border-slate-300',
-        header: 'bg-slate-100/80',
-        icon: 'bg-slate-200 text-slate-700',
-        count: 'bg-slate-200 text-slate-800',
+        border: 'border-outline',
+        header: 'bg-surface-container-low/80',
+        icon: 'bg-surface-container text-on-surface-variant',
+        count: 'bg-surface-container text-on-surface',
       },
     },
     {
@@ -407,10 +407,10 @@ export default function StaffingPage() {
       icon: <LogIn size={18} />,
       agents: boardAgents.filter((agent) => agent.status === 'loggedIn'),
       color: {
-        border: 'border-emerald-300',
-        header: 'bg-emerald-50',
-        icon: 'bg-emerald-100 text-emerald-700',
-        count: 'bg-emerald-100 text-emerald-800',
+        border: 'border-success/40',
+        header: 'bg-success-container/70',
+        icon: 'bg-success-container text-on-success-container',
+        count: 'bg-success-container text-on-success-container',
       },
     },
     {
@@ -420,10 +420,10 @@ export default function StaffingPage() {
       icon: <LogOut size={18} />,
       agents: boardAgents.filter((agent) => agent.status === 'loggedOut'),
       color: {
-        border: 'border-amber-300',
-        header: 'bg-amber-50',
-        icon: 'bg-amber-100 text-amber-700',
-        count: 'bg-amber-100 text-amber-800',
+        border: 'border-warning/40',
+        header: 'bg-warning-container/70',
+        icon: 'bg-warning-container text-on-warning-container',
+        count: 'bg-warning-container text-on-warning-container',
       },
     },
     {
@@ -433,10 +433,10 @@ export default function StaffingPage() {
       icon: <CalendarDays size={18} />,
       agents: boardAgents.filter((agent) => agent.status === 'off'),
       color: {
-        border: 'border-sky-300',
-        header: 'bg-sky-50',
-        icon: 'bg-sky-100 text-sky-700',
-        count: 'bg-sky-100 text-sky-800',
+        border: 'border-info/40',
+        header: 'bg-info-container/70',
+        icon: 'bg-info-container text-on-info-container',
+        count: 'bg-info-container text-on-info-container',
       },
     },
     {
@@ -446,10 +446,10 @@ export default function StaffingPage() {
       icon: <UserX size={18} />,
       agents: boardAgents.filter((agent) => agent.status === 'absent'),
       color: {
-        border: 'border-red-300',
-        header: 'bg-red-50',
-        icon: 'bg-red-100 text-red-700',
-        count: 'bg-red-100 text-red-800',
+        border: 'border-error/40',
+        header: 'bg-error-container/70',
+        icon: 'bg-error-container text-on-error-container',
+        count: 'bg-error-container text-on-error-container',
       },
     },
   ]
@@ -658,7 +658,7 @@ export default function StaffingPage() {
                     <article
                       key={agent.id}
                       onClick={() => handleAgentCardClick(agent)}
-                      className={`rounded-lg border border-outline-variant/60 bg-white p-4 shadow-sm transition ${
+                      className={`rounded-lg border border-outline-variant/60 bg-surface p-4 shadow-sm transition ${
                         agent.status === 'off'
                           ? 'cursor-default'
                           : 'cursor-pointer hover:border-primary-container/70 hover:shadow-md'
@@ -666,28 +666,28 @@ export default function StaffingPage() {
                     >
                       <div className="flex items-start justify-between gap-3">
                         <h3 className="font-semibold text-on-surface">{agent.name}</h3>
-                        <span className="shrink-0 rounded-full bg-indigo-100 px-2.5 py-1 text-label-sm font-semibold text-indigo-700">
+                        <span className="shrink-0 rounded-full bg-primary/15 px-2.5 py-1 text-label-sm font-semibold text-primary-container">
                           {agent.role}
                         </span>
                       </div>
 
                       <div className="mt-3 flex flex-wrap gap-2">
-                        <span className="rounded-full bg-emerald-100 px-3 py-1 text-label-sm font-semibold text-emerald-700">
+                        <span className="rounded-full bg-success-container px-3 py-1 text-label-sm font-semibold text-on-success-container">
                           Shift In {agent.startShift}
                         </span>
-                        <span className="rounded-full bg-amber-100 px-3 py-1 text-label-sm font-semibold text-amber-700">
+                        <span className="rounded-full bg-warning-container px-3 py-1 text-label-sm font-semibold text-on-warning-container">
                           Shift Out {agent.endShift}
                         </span>
-                        <span className="rounded-full bg-slate-100 px-3 py-1 text-label-sm font-semibold text-slate-700">
+                        <span className="rounded-full bg-surface-container px-3 py-1 text-label-sm font-semibold text-on-surface-variant">
                           Off {agent.dayOff1}, {agent.dayOff2}
                         </span>
                         {agent.status === 'off' && (
-                          <span className="rounded-full bg-sky-100 px-3 py-1 text-label-sm font-semibold text-sky-700">
+                          <span className="rounded-full bg-info-container px-3 py-1 text-label-sm font-semibold text-on-info-container">
                             Off applies {agent.dayOffApplies}
                           </span>
                         )}
                         {agent.status === 'absent' && (
-                          <span className="rounded-full bg-red-100 px-3 py-1 text-label-sm font-semibold text-red-700">
+                          <span className="rounded-full bg-error-container px-3 py-1 text-label-sm font-semibold text-on-error-container">
                             Confirmed absent
                           </span>
                         )}
@@ -738,11 +738,11 @@ export default function StaffingPage() {
               {boardAgents.length > 0 ? (
                 boardAgents.map((agent) => {
                   const statusColors = {
-                    notLoggedIn: 'bg-slate-100 text-slate-700',
-                    loggedIn: 'bg-emerald-100 text-emerald-700',
-                    loggedOut: 'bg-amber-100 text-amber-700',
-                    off: 'bg-sky-100 text-sky-700',
-                    absent: 'bg-red-100 text-red-700',
+                    notLoggedIn: 'bg-surface-container text-on-surface-variant',
+                    loggedIn: 'bg-success-container text-on-success-container',
+                    loggedOut: 'bg-warning-container text-on-warning-container',
+                    off: 'bg-info-container text-on-info-container',
+                    absent: 'bg-error-container text-on-error-container',
                   }
 
                   return (
@@ -754,7 +754,7 @@ export default function StaffingPage() {
                         <p className="font-semibold text-on-surface">{agent.name}</p>
                       </td>
                       <td className="px-6 py-4">
-                        <span className="rounded-full bg-indigo-100 px-2.5 py-1 text-label-sm font-semibold text-indigo-700">
+                        <span className="rounded-full bg-primary/15 px-2.5 py-1 text-label-sm font-semibold text-primary-container">
                           {agent.role}
                         </span>
                       </td>
@@ -788,8 +788,8 @@ export default function StaffingPage() {
                             agent.status === 'off'
                               ? 'cursor-default opacity-50'
                               : agent.status === 'absent'
-                                ? 'bg-red-100 text-red-700 hover:bg-red-200'
-                                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                                ? 'bg-error-container text-on-error-container hover:bg-error-container/80'
+                                : 'bg-surface-container text-on-surface-variant hover:bg-surface-container-high'
                           }`}
                           disabled={agent.status === 'off'}
                         >

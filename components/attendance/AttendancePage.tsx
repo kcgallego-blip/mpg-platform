@@ -20,7 +20,7 @@ export default function AttendancePage() {
 
   return (
     <div className="flex min-h-[65vh] items-center justify-center">
-      <div className="max-w-md rounded-2xl border border-error/20 bg-white/80 p-8 text-center shadow-sm">
+      <div className="max-w-md rounded-2xl border border-error/20 bg-surface/80 p-8 text-center shadow-sm">
         <ShieldX size={36} className="mx-auto mb-4 text-error" />
         <h1 className="font-hanken text-2xl font-bold text-on-surface">Attendance access restricted</h1>
         <p className="mt-2 text-sm text-on-surface-variant">

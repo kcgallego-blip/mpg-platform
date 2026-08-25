@@ -58,10 +58,10 @@ const AGENT_TICKET_PAGE_SIZE = 50
 const TPH_VISIBILITY_MINIMUM_MINUTES = 120
 
 const STATUS_LANES = [
-  { key: 'Open', title: 'Open', color: 'border-red-300', header: 'bg-red-50', icon: 'bg-red-100 text-red-700', count: 'bg-red-100 text-red-800' },
-  { key: 'Pending', title: 'Pending', color: 'border-blue-300', header: 'bg-blue-50', icon: 'bg-blue-100 text-blue-700', count: 'bg-blue-100 text-blue-800' },
-  { key: 'On-Hold', title: 'On-Hold', color: 'border-slate-400', header: 'bg-slate-100', icon: 'bg-slate-200 text-slate-800', count: 'bg-slate-200 text-slate-900' },
-  { key: 'Solved', title: 'Solved', color: 'border-gray-300', header: 'bg-gray-50', icon: 'bg-gray-100 text-gray-700', count: 'bg-gray-100 text-gray-800' },
+  { key: 'Open', title: 'Open', color: 'border-error/40', header: 'bg-error-container/70', icon: 'bg-error-container text-on-error-container', count: 'bg-error-container text-on-error-container' },
+  { key: 'Pending', title: 'Pending', color: 'border-info/40', header: 'bg-info-container/70', icon: 'bg-info-container text-on-info-container', count: 'bg-info-container text-on-info-container' },
+  { key: 'On-Hold', title: 'On-Hold', color: 'border-outline', header: 'bg-surface-container-low', icon: 'bg-surface-container text-on-surface', count: 'bg-surface-container text-on-surface' },
+  { key: 'Solved', title: 'Solved', color: 'border-success/40', header: 'bg-success-container/70', icon: 'bg-success-container text-on-success-container', count: 'bg-success-container text-on-success-container' },
 ]
 
 const getPhilippineDate = (date: Date) => {
@@ -517,7 +517,7 @@ export default function AgentPage() {
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
               {STATUS_LANES.map((lane) => (
-                <div key={lane.key} className={`rounded-lg border bg-white p-4 ${lane.color}`}>
+                <div key={lane.key} className={`rounded-lg border bg-surface p-4 ${lane.color}`}>
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
                       <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${lane.icon}`}>
@@ -661,7 +661,7 @@ export default function AgentPage() {
                       laneTickets.map((ticket) => (
                         <article
                           key={ticket.ticket_num}
-                          className="rounded-lg border border-outline-variant/60 bg-white p-4 shadow-sm"
+                          className="rounded-lg border border-outline-variant/60 bg-surface p-4 shadow-sm"
                         >
                           <div className="flex items-center justify-between">
                             <span className="font-semibold text-on-surface">
@@ -702,7 +702,7 @@ export default function AgentPage() {
           >
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-warning-container text-on-warning-container">
                   <AlertTriangle size={22} aria-hidden="true" />
                 </div>
                 <div>

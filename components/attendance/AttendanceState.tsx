@@ -17,7 +17,7 @@ export default function AttendanceState({
 
   return (
     <div
-      className="flex min-h-56 flex-col items-center justify-center rounded-xl border border-outline-variant/30 bg-white/70 px-6 py-12 text-center"
+      className="flex min-h-56 flex-col items-center justify-center rounded-xl border border-outline-variant/30 bg-surface/70 px-6 py-12 text-center"
       role={kind === 'error' ? 'alert' : 'status'}
     >
       <Icon

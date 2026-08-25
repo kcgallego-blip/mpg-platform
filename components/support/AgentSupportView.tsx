@@ -69,14 +69,14 @@ export default function AgentSupportView({ email }: { email: string }) {
         <AlertTriangle size={38} className="mb-3 text-error" />
         <h1 className="font-hanken text-2xl font-bold">Knowledge base unavailable</h1>
         <p className="mt-2 text-sm text-on-surface-variant">{error}</p>
-        <button onClick={() => void load()} className="mt-5 rounded-lg bg-primary-container px-4 py-2 text-sm font-semibold text-white">Try again</button>
+        <button onClick={() => void load()} className="mt-5 rounded-lg bg-primary-container px-4 py-2 text-sm font-semibold text-on-primary-container">Try again</button>
       </div>
     )
   }
 
   if (!category) {
     return (
-      <div className="flex min-h-[60vh] items-center justify-center rounded-xl border border-dashed border-outline-variant bg-white/60 text-center">
+      <div className="flex min-h-[60vh] items-center justify-center rounded-xl border border-dashed border-outline-variant bg-surface/60 text-center">
         <div><h1 className="font-hanken text-2xl font-bold">Knowledge base is ready</h1><p className="mt-2 text-on-surface-variant">A team leader has not added any categories yet.</p></div>
       </div>
     )
@@ -88,7 +88,7 @@ export default function AgentSupportView({ email }: { email: string }) {
       <SupportSearchBar value={query} onChange={setQuery} categoryName={category.name} resultCount={rows.length} totalCount={category.rows.length} />
       <div className="py-5">
         {(syncing || offline) && (
-          <div className={`mb-3 flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium ${offline ? 'bg-amber-50 text-amber-800' : 'bg-blue-50 text-primary-container'}`}>
+          <div className={`mb-3 flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium ${offline ? 'bg-warning-container text-on-warning-container' : 'bg-info-container text-on-info-container'}`}>
             {offline ? <CloudOff size={15} /> : <RefreshCw size={15} className="animate-spin" />}
             {offline ? 'Offline: showing the latest saved copy on this device.' : 'Checking for knowledge-base updates…'}
           </div>

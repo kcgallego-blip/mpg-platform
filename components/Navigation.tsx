@@ -1,10 +1,9 @@
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/lib/authStore'
 import { useFeatureSettingsStore } from '@/lib/featureSettingsStore'
 import { getPostLoginRoute } from '@/lib/routes'
-import { LogOut, User, LayoutDashboard, Ticket, FileText, ChevronDown, ChevronRight, Users, BarChart3, TrendingUp, Wrench, MessageSquareText, CalendarClock, SlidersHorizontal, BookOpen } from 'lucide-react'
-import { useState, useEffect, useRef, type ComponentType } from 'react'
+import { User, LayoutDashboard, Ticket, FileText, ChevronDown, ChevronRight, Users, BarChart3, TrendingUp, Wrench, MessageSquareText, CalendarClock, SlidersHorizontal, BookOpen, History } from 'lucide-react'
+import { useState, useEffect, type ComponentType } from 'react'
 import Image from 'next/image'
 
 type IconComponent = ComponentType<any>
@@ -68,6 +67,12 @@ const attendanceNavItem: NavItem = {
   label: 'Attendance',
 }
 
+const changelogNavItem: NavItem = {
+  href: '/changelogs',
+  icon: History,
+  label: 'Changelogs',
+}
+
 function withAttendance(items: NavItem[], showAttendance: boolean) {
   if (!showAttendance) return items
   return [items[0], attendanceNavItem, ...items.slice(1)]
@@ -78,24 +83,21 @@ function getNavItemsByRole(
   showAttendance: boolean
 ): NavItem[] {
   if (!role) {
-    return [{ href: '/staffing', icon: LayoutDashboard, label: 'Staffing' }]
+    return [changelogNavItem]
   }
 
-  if (role === 'Admin') return withAttendance(allNavItems, true)
+  if (role === 'Admin') return [...withAttendance(allNavItems, true), changelogNavItem]
   if (role.trim().toLowerCase() === 'agent') {
-    return withAttendance(agentNavItems, showAttendance)
+    return [...withAttendance(agentNavItems, showAttendance), changelogNavItem]
   }
 
   // Every assigned non-Agent role can submit and manage IT tickets.
-  return withAttendance(managerNavItems, showAttendance)
+  return [...withAttendance(managerNavItems, showAttendance), changelogNavItem]
 }
 
 export default function Navigation() {
-  const router = useRouter()
-  const { user, logout } = useAuthStore()
+  const { user } = useAuthStore()
   const [expandedItems, setExpandedItems] = useState<string[]>(['IT', 'Utilities'])
-  const [showLogout, setShowLogout] = useState(false)
-  const profileRef = useRef<HTMLDivElement>(null)
   const canAccessAttendance = useFeatureSettingsStore(
     (state) => state.canAccessAttendance
   )
@@ -106,35 +108,13 @@ export default function Navigation() {
     user?.role === 'Admin' ||
     (settingsLoadedFor === user?.email && canAccessAttendance)
   const navItems = getNavItemsByRole(user?.role, showAttendance)
-  const homeHref = getPostLoginRoute(user?.role)
-
-  const handleLogout = async () => {
-    setShowLogout(false)
-    await logout()
-    router.push('/login')
-  }
+  const homeHref = user?.role ? getPostLoginRoute(user.role) : '/changelogs'
 
   useEffect(() => {
     if (user?.email) {
       void loadFeatureSettings(user.email)
     }
   }, [loadFeatureSettings, user?.email])
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (profileRef.current && !profileRef.current.contains(event.target as Node)) {
-        setShowLogout(false)
-      }
-    }
-
-    if (showLogout) {
-      document.addEventListener('mousedown', handleClickOutside)
-    }
-
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside)
-    }
-  }, [showLogout])
 
   const toggleExpand = (label: string) => {
     setExpandedItems(prev =>
@@ -157,16 +137,17 @@ export default function Navigation() {
                 height={48}
                 className="object-contain"
               />
-              <span className="font-hanken text-2xl font-bold text-white">CLAD</span>
+              <span className="font-hanken text-2xl font-bold text-on-primary-container">CLAD</span>
             </Link>
 
             <div className="flex items-center gap-4">
-              <div className="relative" ref={profileRef}>
-                <button
-                  onClick={() => setShowLogout(prev => !prev)}
+              <div className="relative">
+                <Link
+                  href="/profile"
+                  aria-label="Open profile"
                   className="flex items-center gap-2 px-4 py-2 rounded-lg hover:bg-surface-container-high transition-colors"
                 >
-                  <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center overflow-hidden">
+                  <div className="w-8 h-8 rounded-full bg-surface flex items-center justify-center overflow-hidden">
                     {user?.avatar_image ? (
                       <img
                         src={user.avatar_image}
@@ -178,19 +159,7 @@ export default function Navigation() {
                     )}
                   </div>
                   <span className="text-on-primary-container text-sm font-medium">{user?.email?.split('@')[0]}</span>
-                </button>
-
-                {showLogout && (
-                  <div className="absolute right-0 mt-2 w-48 glass-effect rounded-lg shadow-lg transition-all duration-200 p-2">
-                    <button
-                      onClick={handleLogout}
-                      className="w-full flex items-center gap-3 px-4 py-2 rounded-lg text-error hover:bg-error/10 transition-colors text-sm font-medium"
-                    >
-                      <LogOut size={18} />
-                      Sign Out
-                    </button>
-                  </div>
-                )}
+                </Link>
               </div>
             </div>
           </div>

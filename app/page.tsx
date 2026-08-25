@@ -9,7 +9,7 @@ export default function Home() {
     <div className="min-h-screen relative overflow-hidden">
       {/* Mesh Gradient Background - Very light colors */}
       <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none">
-        <div className="absolute inset-0 bg-gradient-to-br from-white via-blue-50/20 to-white" />
+        <div className="app-page-gradient absolute inset-0" />
         <div className="absolute -top-40 -right-40 w-80 h-80 bg-primary-container/5 rounded-full blur-3xl animate-blob" />
         <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-primary/10 rounded-full blur-3xl animate-blob animation-delay-4000" />
         <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-inverse-primary/5 rounded-full blur-3xl animate-blob animation-delay-2000" />
@@ -18,7 +18,7 @@ export default function Home() {
       {/* Navigation */}
       <nav className="relative z-10 bg-surface/80 backdrop-blur-glass-md border-b border-outline-variant/20">
         <div className="max-w-container mx-auto px-gutter py-6 flex items-center justify-between">
-          <div className="font-hanken text-2xl font-bold text-white flex items-center gap-2">
+          <div className="font-hanken text-2xl font-bold text-on-surface flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-container to-inverse-primary flex items-center justify-center p-1">
               <Image
                 src="/icon.png"
@@ -159,7 +159,7 @@ export default function Home() {
         <div className="max-w-container mx-auto px-gutter py-12">
           <div className="grid grid-cols-4 gap-8 mb-8">
             <div>
-              <p className="font-hanken text-lg font-bold text-white mb-4 flex items-center gap-2">
+              <p className="font-hanken text-lg font-bold text-on-surface mb-4 flex items-center gap-2">
                 <div className="w-6 h-6 rounded bg-gradient-to-br from-primary-container to-inverse-primary flex items-center justify-center p-0.5">
                   <Image
                     src="/icon.png"
