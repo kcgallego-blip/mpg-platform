@@ -32,4 +32,21 @@ export const changelogReleases = [
       fixed: [],
     },
   },
+  {
+    sequence: 2,
+    version: '1.1.1',
+    title: 'Clearer CLAD and Zendesk ticket logging',
+    publishedAt: '2026-08-26T10:00:00.000Z',
+    changes: {
+      added: [
+        'The CLAD extension now shows unlogged tickets and explains why they were not logged.',
+      ],
+      improved: [
+        'Improved Zendesk ticket logging for merged tickets.',
+      ],
+      fixed: [
+        'Fixed a bug where the extension would not log tickets when there are multiple ticket tabs are open.',
+      ],
+    },
+  },
 ] as const satisfies readonly ChangelogRelease[]
