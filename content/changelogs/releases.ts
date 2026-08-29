@@ -49,4 +49,17 @@ export const changelogReleases = [
       ],
     },
   },
+  {
+    sequence: 3,
+    version: '1.1.2',
+    title: 'Team Stats view',
+    publishedAt: '2026-08-28T10:00:00.000Z',
+    changes: {
+      added: [
+        'Agents can now view their team\'s stats in the Stats page.',
+      ],
+      improved: [],
+      fixed: [],
+    },
+  },
 ] as const satisfies readonly ChangelogRelease[]

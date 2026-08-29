@@ -9,6 +9,7 @@ import {
   resolveRosterScopedAgentNames,
   resolveStatsNameFromCandidates,
 } from '../lib/statsIdentity.ts'
+import { resolveStatsRosterEntry } from '../lib/statsRoster.ts'
 
 test('Agent scorecards bypass the stats response cache', () => {
   assert.equal(shouldCacheRoleScopedData('Agent'), false)
@@ -91,6 +92,43 @@ test('an ambiguous identity never exposes another agent scorecard', () => {
       ['John Santos']
     ),
     null
+  )
+})
+
+test('stats roster matching finds a CSV name inside a combined roster name', () => {
+  assert.deepEqual(
+    resolveStatsRosterEntry('Wilron Katipunan', [
+      { name: 'Ernie Lagotoc / Wilron Katipunan', team_leader: 'Charlene Esparza' },
+      { name: 'Another Agent', team_leader: 'Another Leader' },
+    ]),
+    {
+      status: 'matched',
+      rosterName: 'Ernie Lagotoc / Wilron Katipunan',
+      teamLeader: 'Charlene Esparza',
+    }
+  )
+})
+
+test('stats roster matching rejects ambiguous names and missing team leaders', () => {
+  assert.deepEqual(
+    resolveStatsRosterEntry('John Santos', [
+      { name: 'John David Santos', team_leader: 'Leader One' },
+      { name: 'John Paul Santos', team_leader: 'Leader Two' },
+    ]),
+    {
+      status: 'ambiguous',
+      candidates: ['John David Santos', 'John Paul Santos'],
+    }
+  )
+
+  assert.deepEqual(
+    resolveStatsRosterEntry('Maria Cruz', [
+      { name: 'Maria Cruz', team_leader: null },
+    ]),
+    {
+      status: 'missing_team_leader',
+      rosterName: 'Maria Cruz',
+    }
   )
 })
 

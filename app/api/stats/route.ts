@@ -8,10 +8,56 @@ import {
   resolveStatsNameFromCandidates,
 } from '@/lib/statsIdentity'
 import { getStatsWeekNumber, getStatsWeekRange } from '@/lib/statsUtils'
+import {
+  averageStatsSummary,
+  STATS_SUMMARY_FIELDS,
+  type StatsSummaryRow,
+} from '@/lib/statsSummary'
 import type { Database } from '@/types/database'
 
 const MAX_PAGE_SIZE = 50
+const SUMMARY_BATCH_SIZE = 1000
 type StatsRow = Database['public']['Tables']['stats']['Row']
+
+const fetchStatsSummaryRows = async ({
+  isMonthly,
+  periodValue,
+  selectedRange,
+  supervisor,
+}: {
+  isMonthly: boolean
+  periodValue: number
+  selectedRange: number
+  supervisor: string | null
+}) => {
+  const rows: Partial<StatsSummaryRow>[] = []
+  let offset = 0
+
+  while (true) {
+    let summaryQuery = supabaseAdmin
+      .from(isMonthly ? 'stats_month' : 'stats')
+      .select(STATS_SUMMARY_FIELDS.join(', '))
+
+    summaryQuery = isMonthly
+      ? summaryQuery.eq('month', String(periodValue))
+      : summaryQuery.eq('week', periodValue).eq('range', selectedRange)
+
+    if (supervisor && supervisor !== 'all') {
+      summaryQuery = summaryQuery.eq('supervisor', supervisor)
+    }
+
+    const { data, error } = await summaryQuery.range(offset, offset + SUMMARY_BATCH_SIZE - 1)
+    if (error) throw error
+
+    const batch = (data || []) as unknown as Partial<StatsSummaryRow>[]
+    rows.push(...batch)
+
+    if (batch.length < SUMMARY_BATCH_SIZE) break
+    offset += SUMMARY_BATCH_SIZE
+  }
+
+  return rows
+}
 
 const parsePositiveInteger = (value: string | null, fallback: number) => {
   const parsed = Number(value)
@@ -98,10 +144,15 @@ const resolveStatsAgentName = async ({
   return null
 }
 
-const getCanonicalAgentName = async (email: string) => {
+type AgentRosterIdentity = {
+  name: string
+  teamLeader: string | null
+}
+
+const getAgentRosterIdentity = async (email: string): Promise<AgentRosterIdentity | null> => {
   const { data, error } = await supabaseAdmin
     .from('agents')
-    .select('name')
+    .select('name, team_leader')
     .ilike('email', email.trim())
     .limit(1)
 
@@ -110,7 +161,15 @@ const getCanonicalAgentName = async (email: string) => {
     return null
   }
 
-  return data?.[0]?.name?.trim() || null
+  const rosterAgent = data?.[0]
+  const name = rosterAgent?.name?.trim()
+
+  return name
+    ? {
+        name,
+        teamLeader: rosterAgent.team_leader?.trim() || null,
+      }
+    : null
 }
 
 export async function GET(request: NextRequest) {
@@ -127,7 +186,8 @@ export async function GET(request: NextRequest) {
 
     // Get query parameters for filtering and searching
     const searchParams = request.nextUrl.searchParams
-    const searchQuery = searchParams.get('search')?.toLowerCase() || ''
+    const searchQuery = searchParams.get('search')?.trim().toLowerCase() || ''
+    const searchTerm = searchQuery.replace(/[(),]/g, ' ').trim()
     const supervisorFilter = searchParams.get('supervisor')
     const sortBy = searchParams.get('sortBy') || 'name'
     const sortOrder = searchParams.get('sortOrder') || 'asc'
@@ -152,7 +212,8 @@ export async function GET(request: NextRequest) {
     const page = parsePositiveInteger(searchParams.get('page'), 1)
     const pageSize = Math.min(parsePositiveInteger(searchParams.get('pageSize'), 50), MAX_PAGE_SIZE)
     const offset = (page - 1) * pageSize
-    const canonicalAgentName = isAgent ? await getCanonicalAgentName(dbUser.email) : null
+    const agentRosterIdentity = isAgent ? await getAgentRosterIdentity(dbUser.email) : null
+    const canonicalAgentName = agentRosterIdentity?.name || null
     const agentIdentityNames = isAgent
       ? getUniqueStatsIdentityNames([userName, canonicalAgentName])
       : []
@@ -206,8 +267,7 @@ export async function GET(request: NextRequest) {
       query = query.eq('supervisor', supervisorFilter)
     }
     if (searchQuery) {
-      const search = searchQuery.replace(/[(),]/g, ' ').trim()
-      query = query.or(`name.ilike.%${search}%,supervisor.ilike.%${search}%`)
+      query = query.ilike('name', `%${searchTerm}%`)
     }
 
     let selectedRange = 1
@@ -226,8 +286,7 @@ export async function GET(request: NextRequest) {
         rangeQuery = rangeQuery.eq('supervisor', supervisorFilter)
       }
       if (searchQuery) {
-        const search = searchQuery.replace(/[(),]/g, ' ').trim()
-        rangeQuery = rangeQuery.or(`name.ilike.%${search}%,supervisor.ilike.%${search}%`)
+        rangeQuery = rangeQuery.ilike('name', `%${searchTerm}%`)
       }
 
       const { data: latestRangeRows, error: latestRangeError } = await rangeQuery
@@ -306,6 +365,46 @@ export async function GET(request: NextRequest) {
     // through the canonical roster identity.
     const stats = statsForWeek
 
+    let summary: StatsSummaryRow | null = null
+    let summaryMode: 'average' | 'single' | 'none' = 'none'
+    let summaryRowCount = 0
+    let agentTeamSummary: StatsSummaryRow | null = null
+    let agentTeamSummaryRowCount = 0
+
+    if (isAgent && agentRosterIdentity?.teamLeader) {
+      // Agents receive aggregate metrics only. Team membership is identified by
+      // their current roster leader, while each period's stored stats remain an
+      // immutable snapshot and are never rewritten from the roster at read time.
+      const teamSummaryRows = await fetchStatsSummaryRows({
+        isMonthly,
+        periodValue: selectedPeriodValue,
+        selectedRange,
+        supervisor: agentRosterIdentity.teamLeader,
+      })
+      agentTeamSummary = averageStatsSummary(teamSummaryRows)
+      agentTeamSummaryRowCount = teamSummaryRows.length
+    } else if (!isAgent) {
+      if (searchQuery) {
+        if (statsCount === 1 && stats.length === 1) {
+          summary = Object.fromEntries(
+            STATS_SUMMARY_FIELDS.map(field => [field, stats[0][field]])
+          ) as StatsSummaryRow
+          summaryMode = 'single'
+          summaryRowCount = 1
+        }
+      } else {
+        const summaryRows = await fetchStatsSummaryRows({
+          isMonthly,
+          periodValue: selectedPeriodValue,
+          selectedRange,
+          supervisor: supervisorFilter,
+        })
+        summary = averageStatsSummary(summaryRows)
+        summaryMode = summary ? 'average' : 'none'
+        summaryRowCount = summaryRows.length
+      }
+    }
+
     // If team leader/supervisor, also return list of unique supervisors for filtering
     let supervisors: string[] = []
     if (!isAgent) {
@@ -321,6 +420,12 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       stats,
+      summary,
+      summaryMode,
+      summaryRowCount,
+      agentTeamSummary,
+      agentTeamSummaryRowCount,
+      agentTeamLeader: isAgent ? agentRosterIdentity?.teamLeader || null : null,
       supervisors,
       userRole,
       userName,

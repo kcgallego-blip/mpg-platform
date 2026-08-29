@@ -26,6 +26,7 @@ import {
   isScorePassing,
   isNAField,
   formatStatValue,
+  parsePercentage,
 } from '@/lib/statsUtils'
 
 type Stat = {
@@ -55,6 +56,24 @@ type Stat = {
   created_at: string
 }
 
+type StatMetricSummary = Pick<
+  Stat,
+  | 'acw'
+  | 'aht'
+  | 'hold'
+  | 'talk_time'
+  | 'csat_score'
+  | 'dsat'
+  | 'nps_score'
+  | 'promoter'
+  | 'mod'
+  | 'mod_value'
+  | 'fcr'
+  | 'fcr_value'
+  | 'surveys_answered'
+  | 'tph'
+>
+
 type SortConfig = {
   field: string
   order: 'asc' | 'desc'
@@ -62,6 +81,12 @@ type SortConfig = {
 
 type StatsResponse = {
   stats: Stat[]
+  summary: StatMetricSummary | null
+  summaryMode: 'average' | 'single' | 'none'
+  summaryRowCount: number
+  agentTeamSummary: StatMetricSummary | null
+  agentTeamSummaryRowCount: number
+  agentTeamLeader: string | null
   supervisors: string[]
   range: number
   userRole: string
@@ -115,6 +140,7 @@ const SCORECARD_METRICS = [
 
 const PRIMARY_METRICS = ['csat_score', 'acw', 'aht', 'surveys_answered', 'tph']
 const SECONDARY_METRICS = ['nps_score', 'mod', 'fcr']
+const AGENT_TEAM_AVERAGE_METRICS = ['csat_score', 'acw', 'aht', 'tph', 'nps_score', 'mod', 'fcr']
 
 const SCORECARD_METRIC_TIERS = [
   {
@@ -163,6 +189,12 @@ export default function StatsPage() {
   const { user } = useAuthStore()
   const router = useRouter()
   const [stats, setStats] = useState<Stat[]>([])
+  const [statsSummary, setStatsSummary] = useState<StatMetricSummary | null>(null)
+  const [summaryMode, setSummaryMode] = useState<'average' | 'single' | 'none'>('none')
+  const [summaryRowCount, setSummaryRowCount] = useState(0)
+  const [agentTeamSummary, setAgentTeamSummary] = useState<StatMetricSummary | null>(null)
+  const [agentTeamSummaryRowCount, setAgentTeamSummaryRowCount] = useState(0)
+  const [agentTeamLeader, setAgentTeamLeader] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
@@ -222,7 +254,7 @@ export default function StatsPage() {
         pageSize: String(STATS_PAGE_SIZE),
       })
 
-      const cacheKey = `stats:v3:${user.email}:${queryParams.toString()}`
+      const cacheKey = `stats:v5:${user.email}:${queryParams.toString()}`
       const shouldUseCache = shouldCacheRoleScopedData(user.role)
       let data = shouldUseCache ? getClientCache<StatsResponse>(cacheKey) : null
 
@@ -243,6 +275,12 @@ export default function StatsPage() {
         }
       }
       setStats(data.stats || [])
+      setStatsSummary(data.summary || null)
+      setSummaryMode(data.summaryMode || 'none')
+      setSummaryRowCount(data.summaryRowCount || 0)
+      setAgentTeamSummary(data.agentTeamSummary || null)
+      setAgentTeamSummaryRowCount(data.agentTeamSummaryRowCount || 0)
+      setAgentTeamLeader(data.agentTeamLeader || null)
       setTotalStatsRows(data.total || 0)
       setSupervisors(data.supervisors || [])
       setDisplayedRange(data.range || getStatsWeekRange())
@@ -378,6 +416,30 @@ export default function StatsPage() {
     return formattedValue
   }
 
+  const formatLeaderMetricValue = (fieldName: string, value: string | number | null | undefined) => {
+    if (fieldName === 'csat_score') {
+      let percentage = typeof value === 'string' ? parsePercentage(value) : value
+      if (typeof percentage === 'number' && percentage > 0 && percentage < 1) {
+        percentage *= 100
+      }
+      if (typeof percentage === 'number' && Number.isFinite(percentage)) {
+        return `${percentage.toFixed(2)}%`
+      }
+    }
+
+    if (fieldName === 'tph') {
+      const numericValue = typeof value === 'number' ? value : Number.parseFloat(value || '')
+      if (Number.isFinite(numericValue)) return numericValue.toFixed(2)
+    }
+
+    if (fieldName === 'nps_score') {
+      const formattedValue = formatAgentMetricValue(fieldName, value)
+      return formattedValue && formattedValue !== 'â€”' ? `${formattedValue}%` : formattedValue
+    }
+
+    return formatAgentMetricValue(fieldName, value)
+  }
+
   const formatScorecardDate = (date: string) => {
     try {
       return new Intl.DateTimeFormat('en-PH', {
@@ -389,6 +451,122 @@ export default function StatsPage() {
       return ''
     }
   }
+
+  const renderMetricCards = (metricValues: StatMetricSummary) => (
+    <div className="space-y-8">
+      {SCORECARD_METRIC_TIERS.map(tier => {
+        const gridClass = tier.style === 'primary'
+          ? 'grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5'
+          : tier.style === 'secondary'
+            ? 'grid grid-cols-1 gap-4 sm:grid-cols-3'
+            : 'grid grid-cols-2 gap-3 xl:grid-cols-5'
+
+        return (
+          <section key={tier.title} className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className={`h-px flex-1 ${tier.style === 'primary' ? 'bg-primary-container/40' : 'bg-outline-variant'}`} />
+              <h3 className="text-sm font-bold uppercase tracking-[0.18em] text-on-surface-variant">
+                {tier.title}
+              </h3>
+              <div className={`h-px flex-1 ${tier.style === 'primary' ? 'bg-primary-container/40' : 'bg-outline-variant'}`} />
+            </div>
+
+            <div className={gridClass}>
+              {tier.fields.map(field => {
+                const metric = SCORECARD_METRICS.find(item => item.field === field)
+                if (!metric) return null
+                if (metric.field === 'promoter') return null
+
+                const value = metricValues[metric.field as keyof StatMetricSummary]
+                const formattedValue = formatLeaderMetricValue(metric.field, value)
+                if (!formattedValue) return null
+
+                const status = getScorecardStatus(metric.field, value)
+                if (status.label === 'N/A' && formattedValue === 'â€”') return null
+
+                if (tier.style === 'primary') {
+                  return (
+                    <div
+                      key={metric.field}
+                      className="rounded-2xl border-2 border-primary-container/30 bg-gradient-to-br from-primary-container to-inverse-primary p-5 shadow-lg shadow-primary-container/20"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <p className="text-sm font-bold uppercase tracking-[0.16em] text-on-primary-container">
+                            {metric.label}
+                          </p>
+                          <p className="mt-1 text-xs text-on-primary-container/80">
+                            {metric.description}
+                          </p>
+                        </div>
+                        {status.label !== 'N/A' && (
+                          <span className="rounded-full bg-surface px-3 py-1 text-xs font-bold text-on-surface">
+                            {status.label}
+                          </span>
+                        )}
+                      </div>
+                      <div className={`mt-5 whitespace-nowrap text-3xl font-black tracking-tight sm:text-4xl ${status.label === 'Below Target' ? 'text-red-200' : 'text-on-primary-container'}`}>
+                        {formattedValue}
+                      </div>
+                    </div>
+                  )
+                }
+
+                if (tier.style === 'secondary') {
+                  return (
+                    <div
+                      key={metric.field}
+                      className="rounded-xl border border-primary-container/20 bg-primary-container/10 p-5"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <p className="text-sm font-semibold text-primary-container">
+                            {metric.label}
+                          </p>
+                          <p className="mt-1 text-xs text-on-surface-variant">
+                            {metric.description}
+                          </p>
+                        </div>
+                        {status.label !== 'N/A' && (
+                          <span className={`rounded-full px-3 py-1 text-xs font-bold ${status.className}`}>
+                            {status.label}
+                          </span>
+                        )}
+                      </div>
+                      <div className={`mt-4 text-2xl font-bold tracking-tight sm:text-3xl ${status.label === 'Below Target' ? 'text-error' : 'text-on-surface'}`}>
+                        {formattedValue}
+                      </div>
+                    </div>
+                  )
+                }
+
+                return (
+                  <div
+                    key={metric.field}
+                    className="rounded-lg border border-outline-variant/60 bg-surface p-4"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-on-surface-variant">
+                        {metric.label}
+                      </p>
+                      {status.label !== 'N/A' && (
+                        <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${status.className}`}>
+                          {status.label}
+                        </span>
+                      )}
+                    </div>
+                    <div className={`mt-3 text-lg font-semibold ${status.label === 'Below Target' ? 'text-error' : 'text-on-surface'}`}>
+                      {formattedValue}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </section>
+        )
+      })}
+    </div>
+  )
 
   const renderHeader = (field: string) => {
     const isActive = sortConfig.field === field
@@ -429,6 +607,21 @@ export default function StatsPage() {
   const periodLabel = periodType === 'monthly'
     ? new Intl.DateTimeFormat('en-PH', { month: 'long', year: 'numeric' }).format(new Date(new Date().getFullYear(), selectedMonth - 1, 1))
     : `Week ${selectedWeek}`
+  const singleSummaryStat = summaryMode === 'single' ? stats[0] : null
+  const summaryTitle = singleSummaryStat
+    ? singleSummaryStat.name
+    : selectedSupervisor !== 'all'
+      ? `${selectedSupervisor} Team Summary`
+      : 'All Agents Summary'
+  const summaryDescription = singleSummaryStat
+    ? `${singleSummaryStat.supervisor ? `Team Leader: ${singleSummaryStat.supervisor} • ` : ''}${periodLabel}`
+    : summaryMode === 'average'
+      ? `Summary of ${summaryRowCount} ${summaryRowCount === 1 ? 'agent' : 'agents'} • ${periodLabel}`
+      : debouncedSearchQuery
+        ? totalStatsRows > 1
+          ? `${totalStatsRows} agents match this search. Refine it to one agent to show metric cards.`
+          : 'No agent matches this search, so there are no metric cards to show.'
+        : `No stats are available for ${periodLabel}.`
 
   return (
     <div className="space-y-6 pb-8">
@@ -479,6 +672,36 @@ export default function StatsPage() {
             <p className="font-medium text-error">Error</p>
             <p className="text-sm text-error/80">{error}</p>
           </div>
+        </div>
+      )}
+
+      {!isAgentView && (
+        <div className="rounded-2xl border border-outline-variant/60 bg-surface p-5 shadow-sm" aria-live="polite">
+          <div>
+            <p className="text-label-md font-semibold uppercase text-primary-container">
+              {summaryMode === 'single' ? 'Agent Scorecard' : 'Main Metrics'}
+            </p>
+            <h2 className="mt-1 font-hanken text-headline-md font-bold text-on-surface">
+              {summaryTitle}
+            </h2>
+            <p className="mt-1 text-sm text-on-surface-variant">
+              {summaryDescription}
+            </p>
+          </div>
+
+          {statsSummary ? (
+            <div className="mt-6">
+              {renderMetricCards(statsSummary)}
+            </div>
+          ) : (
+            <div className="mt-6 flex min-h-32 flex-col items-center justify-center rounded-xl border border-dashed border-outline-variant bg-surface-dim px-4 py-8 text-center">
+              <AlertCircle size={28} className="mb-3 text-on-surface-variant/50" />
+              <p className="font-medium text-on-surface">No main metric data</p>
+              <p className="mt-1 max-w-xl text-sm text-on-surface-variant">
+                {summaryDescription}
+              </p>
+            </div>
+          )}
         </div>
       )}
 
@@ -783,6 +1006,51 @@ export default function StatsPage() {
                 )
               })}
             </div>
+
+            <section className="mt-8 border-t border-outline-variant/60 pt-6" aria-live="polite">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary-container">
+                  Team Average
+                </p>
+                <h3 className="mt-1 font-hanken text-lg font-bold text-on-surface">
+                  {agentTeamLeader ? `${agentTeamLeader}'s Team` : 'Team metrics unavailable'}
+                </h3>
+                <p className="mt-1 text-xs text-on-surface-variant">
+                  {agentTeamSummary
+                    ? ``
+                    : agentTeamLeader
+                      ? `No team metrics are available for ${periodLabel}.`
+                      : 'Your roster record does not currently have a team leader assigned.'}
+                </p>
+              </div>
+
+              {agentTeamSummary && (
+                <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
+                  {AGENT_TEAM_AVERAGE_METRICS.map(field => {
+                    const metric = SCORECARD_METRICS.find(item => item.field === field)
+                    if (!metric) return null
+
+                    const value = agentTeamSummary[field as keyof StatMetricSummary]
+                    const formattedValue = formatLeaderMetricValue(field, value)
+                    if (!formattedValue) return null
+
+                    return (
+                      <div
+                        key={field}
+                        className="rounded-lg border border-outline-variant/60 bg-surface-container-low p-3"
+                      >
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-on-surface-variant">
+                          {metric.label}
+                        </p>
+                        <p className="mt-2 text-lg font-bold text-on-surface">
+                          {formattedValue}
+                        </p>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </section>
           </div>
         )
       ) : stats.length === 0 ? (

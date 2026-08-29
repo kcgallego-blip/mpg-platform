@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAuthStore } from '@/lib/authStore'
 import { invalidateClientCache } from '@/lib/clientCache'
@@ -21,6 +22,7 @@ import {
   CheckCircle,
   Loader2,
   FileText,
+  ArrowRightLeft,
   X,
 } from 'lucide-react'
 
@@ -163,7 +165,13 @@ export default function StatsUploadPage() {
 
       if (!response.ok) {
         const errorData = await response.json()
-        throw new Error(errorData.error || 'Failed to import stats')
+        showNotification(
+          'error',
+          'Upload failed',
+          errorData.error || 'Failed to import stats',
+          Array.isArray(errorData.errors) ? errorData.errors.join('\n') : undefined
+        )
+        return
       }
 
       const result = await response.json()
@@ -208,16 +216,26 @@ export default function StatsUploadPage() {
   return (
     <div className="space-y-6 pb-8">
       {/* Header */}
-      <div>
-        <p className="text-label-md font-semibold uppercase text-primary-container">
-          Stats Management
-        </p>
-        <h1 className="font-hanken text-headline-lg font-bold text-on-surface">
-          Upload Stats Data
-        </h1>
-        <p className="mt-2 max-w-3xl text-on-surface-variant">
-          Import agent performance metrics from a CSV file. The file must include a Name column. If Supervisor is missing, the uploader is used as the team leader.
-        </p>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-label-md font-semibold uppercase text-primary-container">
+            Stats Management
+          </p>
+          <h1 className="font-hanken text-headline-lg font-bold text-on-surface">
+            Upload Stats Data
+          </h1>
+          <p className="mt-2 max-w-3xl text-on-surface-variant">
+            Import agent performance metrics from a CSV file. Each Name is matched against the agent roster, and the Team Leader is taken from the roster rather than the CSV.
+            The assignment is saved with the selected period, so later roster changes do not alter previously uploaded stats.
+          </p>
+        </div>
+        <Link
+          href="/survey"
+          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-outline bg-surface px-4 py-2.5 text-sm font-medium text-on-surface transition hover:bg-surface-dim"
+        >
+          <ArrowRightLeft size={17} />
+          Switch to upload survey
+        </Link>
       </div>
 
       {notification && (
@@ -238,7 +256,7 @@ export default function StatsUploadPage() {
                 {notification.message}
               </p>
               {notification.details && (
-                <p className={`mt-2 text-sm ${notification.type === 'success' ? 'text-success/80' : 'text-error/80'}`}>
+                <p className={`mt-2 whitespace-pre-line text-sm ${notification.type === 'success' ? 'text-success/80' : 'text-error/80'}`}>
                   {notification.details}
                 </p>
               )}
@@ -449,8 +467,8 @@ export default function StatsUploadPage() {
             <tbody>
               <tr className="border-b border-outline-variant/30">
                 <td className="px-4 py-2 text-on-surface">Supervisor</td>
-                <td className="px-4 py-2 text-on-surface-variant">Text, optional</td>
-                <td className="px-4 py-2 font-mono text-on-surface">Charlene Esparza</td>
+                <td className="px-4 py-2 text-on-surface-variant">Ignored</td>
+                <td className="px-4 py-2 text-on-surface-variant">Team Leader comes from the agent roster</td>
               </tr>
               <tr className="border-b border-outline-variant/30">
                 <td className="px-4 py-2 text-on-surface">Name</td>

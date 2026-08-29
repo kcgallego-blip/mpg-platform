@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { STATS_COLUMNS, STATS_MONTH_COLUMNS } from '@/lib/dbColumns'
 import { getAuthenticatedDbUser } from '@/lib/sessionAuth'
 import { canUploadStats } from '@/lib/statsAccess'
+import { resolveStatsRosterEntry, type StatsRosterEntry } from '@/lib/statsRoster'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 
 const parseWeek = (value: unknown) => {
@@ -37,8 +38,6 @@ export async function POST(request: NextRequest) {
         { status: 403 }
       )
     }
-
-    const defaultSupervisor = dbUser.name || ''
 
     // Parse request body
     const body = await request.json()
@@ -94,11 +93,73 @@ export async function POST(request: NextRequest) {
       records.push(record)
     }
 
-    // Convert to database format
-    const dbRecords = records
-      .filter(r => r.Name)
-      .map(r => ({
-        supervisor: r.Supervisor || defaultSupervisor,
+    const recordsWithNames = records
+      .map((record, index) => ({ record, rowNumber: index + 2 }))
+      .filter(({ record }) => record.Name)
+
+    if (recordsWithNames.length === 0) {
+      return NextResponse.json(
+        { error: 'CSV must include a Name column with at least one agent name' },
+        { status: 400 }
+      )
+    }
+
+    // Fetch the authoritative roster once, then resolve every CSV name locally.
+    // The CSV Supervisor column is intentionally ignored. The resolved leader is
+    // stored with this import as a historical snapshot; stats reads do not join
+    // back to the roster, so later roster changes do not rewrite older periods.
+    const { data: rosterData, error: rosterError } = await supabaseAdmin
+      .from('agents')
+      .select('name, team_leader')
+
+    if (rosterError) {
+      return NextResponse.json(
+        { error: `Failed to read the agent roster: ${rosterError.message}` },
+        { status: 500 }
+      )
+    }
+
+    const roster = ((rosterData || []) as StatsRosterEntry[])
+      .map(agent => ({
+        name: agent.name?.trim(),
+        team_leader: agent.team_leader,
+      }))
+      .filter((agent): agent is StatsRosterEntry => Boolean(agent.name))
+
+    const resolvedRecords = recordsWithNames.map(({ record, rowNumber }) => ({
+      record,
+      rowNumber,
+      resolution: resolveStatsRosterEntry(record.Name.trim(), roster),
+    }))
+    const validationErrors = resolvedRecords.flatMap(({ record, rowNumber, resolution }) => {
+      if (resolution.status === 'matched') return []
+      if (resolution.status === 'ambiguous') {
+        return [`Row ${rowNumber}: "${record.Name}" matches multiple agents: ${resolution.candidates.join(', ')}`]
+      }
+      if (resolution.status === 'missing_team_leader') {
+        return [`Row ${rowNumber}: "${record.Name}" matched "${resolution.rosterName}", but that agent has no Team Leader`]
+      }
+      return [`Row ${rowNumber}: "${record.Name}" did not match an agent in the roster`]
+    })
+
+    if (validationErrors.length > 0) {
+      return NextResponse.json(
+        {
+          error: `Agent roster validation failed for ${validationErrors.length} row${validationErrors.length === 1 ? '' : 's'}. No Stats data was changed.`,
+          errors: validationErrors,
+        },
+        { status: 422 }
+      )
+    }
+
+    // Convert to database format only after the entire roster has been validated.
+    const dbRecords = resolvedRecords.map(({ record: r, resolution }) => {
+      if (resolution.status !== 'matched') {
+        throw new Error('Unexpected unresolved roster entry after validation')
+      }
+
+      return {
+        supervisor: resolution.teamLeader,
         name: r.Name,
         acw: r.ACW || null,
         aht: r.AHT || null,
@@ -124,14 +185,8 @@ export async function POST(request: NextRequest) {
               week: selectedWeek ?? 1,
               range: selectedRange ?? 1,
             }),
-      }))
-
-    if (dbRecords.length === 0) {
-      return NextResponse.json(
-        { error: 'CSV must include a Name column with at least one agent name' },
-        { status: 400 }
-      )
-    }
+      }
+    })
 
     // Capture existing rows so a failed import can restore the previous week data.
     const tableName = selectedPeriodType === 'monthly' ? 'stats_month' : 'stats'
