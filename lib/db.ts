@@ -11,7 +11,7 @@ const USER_PROFILE_COLUMNS = 'email, name, role, registered_at, access, avatar_i
 export type AccountUser = Pick<
   Database['public']['Tables']['users']['Row'],
   'email' | 'name' | 'role' | 'registered_at' | 'access' | 'avatar_image' | 'is_active' | 'last_login'
->
+> & { hasLocalPassword: boolean }
 
 // ============================================================================
 // REPORTS FUNCTIONS
@@ -326,13 +326,14 @@ export async function updateUserProfile(
 }
 
 export async function getUsers() {
-  const { data, error } = await supabase
-    .from('users')
-    .select(USER_PROFILE_COLUMNS)
-    .order('registered_at', { ascending: false })
+  const response = await fetch('/api/accounts', {
+    cache: 'no-store',
+    credentials: 'same-origin',
+  })
+  const data = await response.json() as { users?: AccountUser[]; error?: string }
 
-  if (error) throw error
-  return (data || []) as AccountUser[]
+  if (!response.ok) throw new Error(data.error || 'Failed to load accounts')
+  return data.users ?? []
 }
 
 export async function updateUserStatus(email: string, is_active: boolean) {

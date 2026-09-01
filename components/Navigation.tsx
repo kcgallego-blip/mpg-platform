@@ -53,6 +53,17 @@ const managerNavItems: NavItem[] = [
   },
 ]
 
+const itNavItems: NavItem[] = [
+  ...managerNavItems,
+  {
+    label: 'Utilities',
+    icon: Wrench,
+    children: [
+      { href: '/utilities/accounts', icon: Users, label: 'Accounts' },
+    ],
+  },
+]
+
 const agentNavItems: NavItem[] = [
   { href: '/agent', icon: LayoutDashboard, label: 'Agent' },
   { href: '/support', icon: BookOpen, label: 'Support' },
@@ -89,6 +100,9 @@ function getNavItemsByRole(
   if (role === 'Admin') return [...withAttendance(allNavItems, true), changelogNavItem]
   if (role.trim().toLowerCase() === 'agent') {
     return [...withAttendance(agentNavItems, showAttendance), changelogNavItem]
+  }
+  if (role.trim().toLowerCase() === 'it') {
+    return [...withAttendance(itNavItems, showAttendance), changelogNavItem]
   }
 
   // Every assigned non-Agent role can submit and manage IT tickets.

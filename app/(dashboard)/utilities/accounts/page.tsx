@@ -1,10 +1,11 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import { Search, User, Mail, Shield, Clock, CheckCircle, XCircle, RefreshCw, ChevronDown, Pencil } from 'lucide-react'
+import { Search, User, Mail, Shield, Clock, CheckCircle, XCircle, RefreshCw, ChevronDown, Pencil, KeyRound, Copy, Eye, EyeOff, AlertTriangle, ShieldX } from 'lucide-react'
 import { useAuthStore } from '@/lib/authStore'
 import { getUsers, updateUserStatus, updateUserRole, updateUserName } from '@/lib/db'
 import type { AccountUser } from '@/lib/db'
+import { canResetLocalPassword, canViewAccounts } from '@/lib/accountAccess'
 
 type UserRow = AccountUser
 
@@ -22,6 +23,11 @@ export default function AccountsPage() {
   const [statusModalUser, setStatusModalUser] = useState<UserRow | null>(null)
   const [roleModalUser, setRoleModalUser] = useState<UserRow | null>(null)
   const [nameModalUser, setNameModalUser] = useState<UserRow | null>(null)
+  const [resetModalUser, setResetModalUser] = useState<UserRow | null>(null)
+  const [temporaryPassword, setTemporaryPassword] = useState<string | null>(null)
+  const [resetError, setResetError] = useState<string | null>(null)
+  const [showTemporaryPassword, setShowTemporaryPassword] = useState(false)
+  const [copied, setCopied] = useState(false)
   const [tempName, setTempName] = useState('')
 
   const isAdmin = currentUser?.role === 'Admin'
@@ -41,8 +47,10 @@ export default function AccountsPage() {
   }
 
   useEffect(() => {
-    fetchUsers()
-  }, [])
+    if (canViewAccounts(currentUser?.role)) {
+      void fetchUsers()
+    }
+  }, [currentUser?.email, currentUser?.role])
 
   const filteredUsers = useMemo(() => {
     if (!searchQuery) return users
@@ -113,6 +121,49 @@ export default function AccountsPage() {
     }
   }
 
+  const closeResetModal = () => {
+    setResetModalUser(null)
+    setTemporaryPassword(null)
+    setResetError(null)
+    setShowTemporaryPassword(false)
+    setCopied(false)
+  }
+
+  const handlePasswordReset = async () => {
+    if (!resetModalUser) return
+
+    setSavingUser(resetModalUser.email)
+    setResetError(null)
+    try {
+      const response = await fetch('/api/accounts/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ email: resetModalUser.email }),
+      })
+      const data = await response.json() as { temporaryPassword?: string; error?: string }
+      if (!response.ok || !data.temporaryPassword) {
+        throw new Error(data.error || 'Failed to reset password')
+      }
+      setTemporaryPassword(data.temporaryPassword)
+    } catch (resetRequestError) {
+      setResetError(resetRequestError instanceof Error ? resetRequestError.message : 'Failed to reset password')
+    } finally {
+      setSavingUser(null)
+    }
+  }
+
+  const handleCopyTemporaryPassword = async () => {
+    if (!temporaryPassword) return
+
+    try {
+      await navigator.clipboard.writeText(temporaryPassword)
+      setCopied(true)
+    } catch {
+      setResetError('Copy failed. Select and copy the temporary password manually.')
+    }
+  }
+
   const formatDateTime = (dateStr: string | null) => {
     if (!dateStr) return '-'
     const d = new Date(dateStr)
@@ -123,6 +174,18 @@ export default function AccountsPage() {
       hour: '2-digit',
       minute: '2-digit',
     })
+  }
+
+  if (currentUser && !canViewAccounts(currentUser.role)) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center">
+        <div className="max-w-md rounded-2xl border border-error/20 bg-surface/80 p-8 text-center">
+          <ShieldX size={36} className="mx-auto mb-4 text-error" />
+          <h1 className="font-hanken text-2xl font-bold text-on-surface">Admin or IT access required</h1>
+          <p className="mt-2 text-sm text-on-surface-variant">You do not have permission to view user accounts.</p>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -212,6 +275,9 @@ export default function AccountsPage() {
                 <th className="px-4 py-3 text-left text-label-sm font-semibold text-on-surface-variant">
                   Status
                 </th>
+                <th className="px-4 py-3 text-left text-label-sm font-semibold text-on-surface-variant">
+                  Actions
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-outline-variant/10">
@@ -281,6 +347,27 @@ export default function AccountsPage() {
                       {user.is_active ? 'Active' : 'Inactive'}
                     </button>
                   </td>
+                  <td className="px-4 py-3">
+                    {currentUser && canResetLocalPassword(currentUser, user) ? (
+                      <button
+                        type="button"
+                        onClick={() => setResetModalUser(user)}
+                        disabled={savingUser === user.email}
+                        className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg bg-primary/10 px-3 py-2 text-xs font-medium text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"
+                      >
+                        <KeyRound size={14} />
+                        Reset password
+                      </button>
+                    ) : (
+                      <span className="text-xs text-on-surface-variant">
+                        {!user.hasLocalPassword
+                          ? 'Webex account'
+                          : currentUser?.email.toLowerCase() === user.email.toLowerCase()
+                            ? 'Current account'
+                            : 'Not permitted'}
+                      </span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -320,6 +407,98 @@ export default function AccountsPage() {
                 {statusModalUser.is_active ? 'Deactivate' : 'Activate'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {resetModalUser && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={temporaryPassword ? undefined : closeResetModal}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="reset-password-title"
+        >
+          <div className="w-full max-w-md rounded-xl bg-surface p-6" onClick={(event) => event.stopPropagation()}>
+            <h3 id="reset-password-title" className="font-hanken text-headline-md font-bold text-on-surface">
+              {temporaryPassword ? 'Temporary password created' : 'Reset password?'}
+            </h3>
+
+            {temporaryPassword ? (
+              <>
+                <p className="mt-2 text-sm text-on-surface-variant">
+                  Copy this password now and send it to {resetModalUser.email} through your approved internal channel. It will not be shown again after closing.
+                </p>
+                <div className="mt-5 flex items-center gap-2 rounded-lg border border-outline-variant/50 bg-surface-container-low p-3">
+                  <input
+                    type={showTemporaryPassword ? 'text' : 'password'}
+                    readOnly
+                    value={temporaryPassword}
+                    aria-label="Temporary password"
+                    className="min-w-0 flex-1 bg-transparent font-mono text-sm text-on-surface outline-none"
+                    onFocus={(event) => event.currentTarget.select()}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowTemporaryPassword((visible) => !visible)}
+                    aria-label={showTemporaryPassword ? 'Hide temporary password' : 'Show temporary password'}
+                    className="rounded-md p-2 text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface"
+                  >
+                    {showTemporaryPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCopyTemporaryPassword}
+                    className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-xs font-medium text-on-primary"
+                  >
+                    <Copy size={16} />
+                    {copied ? 'Copied' : 'Copy'}
+                  </button>
+                </div>
+                <p className="mt-3 text-xs text-on-surface-variant">
+                  The user will be required to create a permanent password after entering this temporary one.
+                </p>
+                {resetError && <p className="mt-3 text-sm text-error" role="alert">{resetError}</p>}
+                <button
+                  type="button"
+                  onClick={closeResetModal}
+                  className="mt-5 w-full rounded-lg bg-primary px-4 py-2 font-medium text-on-primary"
+                >
+                  Done
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="mt-2 text-on-surface-variant">
+                  This replaces the local password for {resetModalUser.email} and signs out existing app sessions.
+                </p>
+                {!resetModalUser.is_active && (
+                  <div className="mt-4 flex gap-2 rounded-lg bg-warning/10 p-3 text-sm text-on-surface" role="note">
+                    <AlertTriangle size={18} className="shrink-0 text-warning" />
+                    This account is inactive and still cannot sign in until activated.
+                  </div>
+                )}
+                {resetError && <p className="mt-3 text-sm text-error" role="alert">{resetError}</p>}
+                <div className="mt-6 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={closeResetModal}
+                    disabled={savingUser === resetModalUser.email}
+                    className="flex-1 rounded-lg px-4 py-2 text-on-surface-variant hover:bg-surface-container-high disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handlePasswordReset}
+                    disabled={savingUser === resetModalUser.email}
+                    className="flex-1 rounded-lg bg-primary px-4 py-2 font-medium text-on-primary disabled:opacity-50"
+                  >
+                    {savingUser === resetModalUser.email ? 'Generating...' : 'Generate password'}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

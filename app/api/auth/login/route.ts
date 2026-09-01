@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { setSessionTokenCookie, createSessionToken } from '@/lib/sessionToken'
-import { supabase } from '@/lib/supabase'
+import { clearSessionTokenCookie, setSessionTokenCookie, createSessionToken } from '@/lib/sessionToken'
 import { verifyPassword } from '@/lib/password'
-import { setAuthCookie } from '@/lib/authCookie'
+import { clearAuthCookie, setAuthCookie } from '@/lib/authCookie'
+import { clearPasswordChangeCookie, setPasswordChangeCookie } from '@/lib/passwordChangeCookie'
+import { supabaseAdmin } from '@/lib/supabaseAdmin'
 
 const ALLOWED_EMAIL_DOMAIN = '@m-piece.com'
 
@@ -21,9 +22,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Email is not valid' }, { status: 400 })
     }
 
-    const { data: user, error: userError } = await supabase
+    const { data: user, error: userError } = await supabaseAdmin
       .from('users')
-      .select('email, name, avatar_image, role, is_active, password_hash')
+      .select('email, name, avatar_image, role, is_active, password_hash, must_change_password, session_version')
       .eq('email', normalizedEmail)
       .maybeSingle()
 
@@ -49,9 +50,27 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid email or password' }, { status: 401 })
     }
 
+    const sessionVersion = user.session_version ?? 0
+
+    if (user.must_change_password === true) {
+      const response = NextResponse.json(
+        { requiresPasswordChange: true },
+        { headers: { 'Cache-Control': 'no-store' } },
+      )
+
+      clearAuthCookie(response)
+      clearSessionTokenCookie(response)
+
+      if (!setPasswordChangeCookie(response, user.email, sessionVersion)) {
+        return NextResponse.json({ error: 'Password-change sessions are not configured' }, { status: 500 })
+      }
+
+      return response
+    }
+
     const sessionToken = createSessionToken()
     const now = new Date().toISOString()
-    const { error: updateError } = await supabase
+    const { error: updateError } = await supabaseAdmin
       .from('users')
       .update({ token: sessionToken, last_login: now })
       .eq('email', normalizedEmail)
@@ -61,10 +80,13 @@ export async function POST(request: NextRequest) {
     }
 
     const response = NextResponse.json({
-      email: user.email,
-      name: user.name || '',
-      avatar_image: user.avatar_image,
-      role: user.role,
+      requiresPasswordChange: false,
+      user: {
+        email: user.email,
+        name: user.name || '',
+        avatar_image: user.avatar_image,
+        role: user.role,
+      },
     })
 
     setSessionTokenCookie(response, sessionToken)
@@ -74,7 +96,9 @@ export async function POST(request: NextRequest) {
       avatar_image: user.avatar_image,
       role: user.role,
       company: null,
+      session_version: sessionVersion,
     }, sessionToken)
+    clearPasswordChangeCookie(response)
 
     return response
   } catch (error: any) {

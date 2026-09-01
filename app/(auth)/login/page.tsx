@@ -54,7 +54,10 @@ function LoginPageContent() {
     setIsLoading(true)
 
     try {
-      await loginWithEmail(email.trim(), password)
+      const result = await loginWithEmail(email.trim(), password)
+      if (result.requiresPasswordChange) {
+        router.replace('/change-password')
+      }
     } catch (err: any) {
       if (err.message?.includes('pending approval')) {
         setToastMessage('Account is currently in pending approval. Please reach out to IT Kevin for further assistance.')

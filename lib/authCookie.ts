@@ -10,6 +10,7 @@ type AuthCookiePayload = {
   avatar_image?: string | null
   company?: string | null
   role?: string | null
+  session_version?: number
   iat: number
   exp: number
 }
@@ -91,6 +92,7 @@ export function signAuthCookie(user: AuthenticatedUser, sessionToken: string) {
 
   return signPayload({
     ...user,
+    session_version: user.session_version ?? 0,
     iat: now,
     exp: now + SESSION_IDLE_TIMEOUT_SECONDS,
   }, sessionToken)

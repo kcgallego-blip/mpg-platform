@@ -3,9 +3,11 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Lock, Mail, User, Eye, EyeOff } from 'lucide-react'
+import { Mail, User } from 'lucide-react'
 import Image from 'next/image'
 import { useAuthStore } from '@/lib/authStore'
+import PasswordFields from '@/components/PasswordFields'
+import { evaluatePassword, getPasswordPolicyError } from '@/lib/passwordPolicy'
 
 const EMAIL_DOMAIN = '@m-piece.com'
 
@@ -15,7 +17,7 @@ export default function RegisterPage() {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [showPassword, setShowPassword] = useState(false)
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -36,15 +38,21 @@ export default function RegisterPage() {
       return
     }
 
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters')
+    const passwordPolicyError = getPasswordPolicyError(password)
+    if (passwordPolicyError) {
+      setError(passwordPolicyError)
+      return
+    }
+
+    if (password !== confirmPassword) {
+      setError('Passwords do not match')
       return
     }
 
     setIsLoading(true)
 
     try {
-      await register(normalizedEmail, normalizedName, password)
+      await register(normalizedEmail, normalizedName, password, confirmPassword)
       router.push('/login?registered=1')
     } catch (err: any) {
       setError(err.message || 'Failed to register account')
@@ -124,36 +132,17 @@ export default function RegisterPage() {
             </div>
           </div>
 
-          <div>
-            <label htmlFor="password" className="mb-2 block text-label-sm font-medium text-on-surface">
-              Password
-            </label>
-            <div className="relative">
-              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant" size={18} />
-              <input
-                id="password"
-                type={showPassword ? 'text' : 'password'}
-                name="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder="Insert password"
-                className="w-full rounded-DEFAULT border border-outline-variant/50 bg-surface-container-low/50 py-sm pl-10 pr-12 text-on-surface placeholder-on-surface-variant/50 transition-all focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                required
-                minLength={8}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-on-surface"
-              >
-                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-              </button>
-            </div>
-          </div>
+          <PasswordFields
+            password={password}
+            confirmPassword={confirmPassword}
+            onPasswordChange={setPassword}
+            onConfirmPasswordChange={setConfirmPassword}
+            disabled={isLoading}
+          />
 
           <button
             type="submit"
-            disabled={isLoading}
+            disabled={isLoading || !evaluatePassword(password).valid || password !== confirmPassword}
             className="w-full rounded-DEFAULT bg-gradient-to-r from-primary-container to-inverse-primary py-sm font-medium text-on-primary-container transition-all hover:shadow-lg hover:shadow-primary-container/30 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isLoading ? 'Registering...' : 'Register'}

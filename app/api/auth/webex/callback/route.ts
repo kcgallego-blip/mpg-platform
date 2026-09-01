@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createSessionToken, setSessionTokenCookie } from '@/lib/sessionToken'
 import { supabase } from '@/lib/supabase'
 import { setAuthCookie } from '@/lib/authCookie'
+import { clearPasswordChangeCookie } from '@/lib/passwordChangeCookie'
 
 export async function GET(request: NextRequest) {
   try {
@@ -80,7 +81,7 @@ export async function GET(request: NextRequest) {
 
     const { data: existingUser, error: existingUserError } = await supabase
       .from('users')
-      .select('email, role, access, registered_at, is_active, name, avatar_image')
+      .select('email, role, access, registered_at, is_active, name, avatar_image, session_version')
       .eq('email', email)
       .maybeSingle()
 
@@ -160,7 +161,9 @@ export async function GET(request: NextRequest) {
       avatar_image: existingUser.avatar_image || avatar || null,
       role: existingUser.role,
       company: null,
+      session_version: existingUser.session_version ?? 0,
     }, sessionToken)
+    clearPasswordChangeCookie(response)
 
     return response
   } catch (error) {

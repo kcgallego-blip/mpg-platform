@@ -2,16 +2,17 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createSessionToken } from '@/lib/sessionToken'
 import { supabase } from '@/lib/supabase'
 import { hashPassword } from '@/lib/password'
+import { getPasswordPolicyError } from '@/lib/passwordPolicy'
 
 const ALLOWED_EMAIL_DOMAIN = '@m-piece.com'
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { email, name, password } = body
+    const { email, name, password, confirmPassword } = body
 
-    if (!email || !name || !password) {
-      return NextResponse.json({ error: 'Email, name, and password are required' }, { status: 400 })
+    if (!email || !name || !password || !confirmPassword) {
+      return NextResponse.json({ error: 'Email, name, password, and confirmation are required' }, { status: 400 })
     }
 
     const normalizedEmail = email.trim().toLowerCase()
@@ -26,8 +27,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Name must be at least 2 characters' }, { status: 400 })
     }
 
-    if (typeof password !== 'string' || password.length < 8) {
-      return NextResponse.json({ error: 'Password must be at least 8 characters' }, { status: 400 })
+    if (password !== confirmPassword) {
+      return NextResponse.json({ error: 'Passwords do not match' }, { status: 400 })
+    }
+
+    const passwordPolicyError = getPasswordPolicyError(password)
+    if (passwordPolicyError) {
+      return NextResponse.json({ error: passwordPolicyError }, { status: 400 })
     }
 
     const { data: existingUser, error: existingUserError } = await supabase

@@ -30,12 +30,16 @@ interface AuthStore {
   error: string | null
   initializeSession: (force?: boolean) => Promise<User | null>
   refreshSession: () => Promise<boolean>
-  loginWithEmail: (email: string, password: string) => Promise<void>
+  loginWithEmail: (email: string, password: string) => Promise<LoginResult>
   loginWithWebex: () => Promise<void>
-  register: (email: string, name: string, password: string) => Promise<void>
+  register: (email: string, name: string, password: string, confirmPassword: string) => Promise<void>
   logout: () => Promise<void>
   applyRemoteLogout: () => void
 }
+
+export type LoginResult =
+  | { requiresPasswordChange: true }
+  | { requiresPasswordChange: false; user: User }
 
 let initializationPromise: Promise<User | null> | null = null
 
@@ -177,14 +181,14 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     }
   },
 
-  register: async (email, name, password) => {
+  register: async (email, name, password, confirmPassword) => {
     try {
       set({ loading: true, error: null })
 
       const response = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, name, password }),
+        body: JSON.stringify({ email, name, password, confirmPassword }),
       })
 
       if (!response.ok) {
@@ -215,12 +219,28 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         throw new Error(errorData.error || 'Failed to login')
       }
 
-      const userData = await response.json() as Record<string, unknown>
-      const user = toUser(userData)
+      const resultData = await response.json() as {
+        requiresPasswordChange?: unknown
+        user?: Record<string, unknown>
+      }
+
+      if (resultData.requiresPasswordChange === true) {
+        set({ user: null, initialized: true, loading: false })
+        clearLegacyAuthStorage()
+        broadcastAuthChange('logout')
+        return { requiresPasswordChange: true }
+      }
+
+      if (resultData.requiresPasswordChange !== false || !resultData.user) {
+        throw new Error('Invalid login response')
+      }
+
+      const user = toUser(resultData.user)
 
       set({ user, initialized: true, loading: false })
       clearLegacyAuthStorage()
       broadcastAuthChange('login')
+      return { requiresPasswordChange: false, user }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Failed to login'
       set({ error: message, loading: false })

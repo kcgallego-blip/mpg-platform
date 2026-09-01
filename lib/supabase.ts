@@ -83,6 +83,10 @@ export type Database = {
           is_active: boolean | null
           last_login: string | null
           token: string | null
+          must_change_password: boolean
+          session_version: number
+          password_reset_requested_at: string | null
+          password_reset_requested_by: string | null
           last_seen_changelog_sequence: number
         }
         Insert: {
@@ -96,6 +100,10 @@ export type Database = {
           is_active?: boolean | null
           last_login?: string | null
           token?: string | null
+          must_change_password?: boolean
+          session_version?: number
+          password_reset_requested_at?: string | null
+          password_reset_requested_by?: string | null
           last_seen_changelog_sequence?: number
         }
         Update: {
@@ -107,6 +115,10 @@ export type Database = {
           is_active?: boolean | null
           last_login?: string | null
           token?: string | null
+          must_change_password?: boolean
+          session_version?: number
+          password_reset_requested_at?: string | null
+          password_reset_requested_by?: string | null
           last_seen_changelog_sequence?: number
         }
       }

@@ -37,6 +37,7 @@ export async function GET(request: NextRequest) {
       avatar_image: user.avatar_image,
       role: user.role,
       company: null,
+      session_version: user.session_version,
     }, sessionToken)
 
     return response

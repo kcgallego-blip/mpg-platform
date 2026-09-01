@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { clearAuthCookie } from '@/lib/authCookie'
 import { clearSessionTokenCookie, getSessionTokenCookie } from '@/lib/sessionToken'
 import { supabase } from '@/lib/supabase'
+import { clearPasswordChangeCookie } from '@/lib/passwordChangeCookie'
 
 export async function POST(request: NextRequest) {
   const sessionToken = getSessionTokenCookie(request)
@@ -17,6 +18,7 @@ export async function POST(request: NextRequest) {
 
   clearAuthCookie(response)
   clearSessionTokenCookie(response)
+  clearPasswordChangeCookie(response)
 
   return response
 }
