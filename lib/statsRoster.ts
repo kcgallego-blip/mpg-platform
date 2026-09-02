@@ -15,6 +15,10 @@ export type StatsRosterResolution =
   | { status: 'ambiguous'; candidates: string[] }
   | { status: 'missing_team_leader'; rosterName: string }
 
+export type StatsTeamLeaderResolution =
+  | { status: 'matched'; teamLeader: string; source: 'roster' | 'history' | 'csv' }
+  | { status: 'missing' }
+
 export const resolveStatsRosterEntry = (
   csvName: string,
   roster: StatsRosterEntry[]
@@ -48,4 +52,37 @@ export const resolveStatsRosterEntry = (
   return bestCandidates.length > 1
     ? { status: 'ambiguous', candidates: bestCandidates }
     : { status: 'unmatched' }
+}
+
+export const resolveStatsTeamLeader = ({
+  csvName,
+  csvTeamLeader,
+  roster,
+  historicalTeamLeader,
+}: {
+  csvName: string
+  csvTeamLeader: string | null | undefined
+  roster: StatsRosterEntry[]
+  historicalTeamLeader: string | null | undefined
+}): StatsTeamLeaderResolution => {
+  const rosterResolution = resolveStatsRosterEntry(csvName, roster)
+  if (rosterResolution.status === 'matched') {
+    return {
+      status: 'matched',
+      teamLeader: rosterResolution.teamLeader,
+      source: 'roster',
+    }
+  }
+
+  const storedTeamLeader = historicalTeamLeader?.trim()
+  if (storedTeamLeader) {
+    return { status: 'matched', teamLeader: storedTeamLeader, source: 'history' }
+  }
+
+  const uploadedTeamLeader = csvTeamLeader?.trim()
+  if (uploadedTeamLeader) {
+    return { status: 'matched', teamLeader: uploadedTeamLeader, source: 'csv' }
+  }
+
+  return { status: 'missing' }
 }

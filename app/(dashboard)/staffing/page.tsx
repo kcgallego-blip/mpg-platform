@@ -4,6 +4,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { CalendarDays, Clock, Grid3x3, Loader2, LogIn, LogOut, RefreshCw, Table2, UserX, Users } from 'lucide-react'
 import { useAuthStore } from '@/lib/authStore'
 import { getClientCache, invalidateClientCache, setClientCache } from '@/lib/clientCache'
+import {
+  getMillisecondsUntilNextStaffingReset,
+  getStaffingResetCycleKey,
+} from '@/lib/staffingPresence'
 
 type ScheduleAgent = {
   id: string
@@ -50,6 +54,8 @@ type Lane = {
 
 const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const STAFFING_CACHE_TTL_MS = 5 * 60 * 1000
+const getStaffingCacheKey = (email: string, date = new Date()) =>
+  `staffing:all-agents:${email}:${getStaffingResetCycleKey(date)}`
 
 const getPhilippineDate = (date: Date) => {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -205,7 +211,7 @@ export default function StaffingPage() {
 
       setError('')
 
-      const cacheKey = `staffing:all-agents:${user.email}`
+      const cacheKey = getStaffingCacheKey(user.email)
       if (force) invalidateClientCache(cacheKey)
       let data = force ? null : getClientCache<ScheduleResponse>(cacheKey)
 
@@ -241,6 +247,22 @@ export default function StaffingPage() {
 
   useEffect(() => {
     void loadSchedule(true)
+  }, [loadSchedule])
+
+  useEffect(() => {
+    let resetTimer: number | undefined
+
+    const scheduleResetRefresh = () => {
+      const resetDelay = getMillisecondsUntilNextStaffingReset(new Date())
+      resetTimer = window.setTimeout(() => {
+        void loadSchedule(false, true).finally(scheduleResetRefresh)
+      }, resetDelay + 1_000)
+    }
+
+    scheduleResetRefresh()
+    return () => {
+      if (resetTimer !== undefined) window.clearTimeout(resetTimer)
+    }
   }, [loadSchedule])
 
   const roleOptions = useMemo(
@@ -301,7 +323,7 @@ export default function StaffingPage() {
       }
       if (user?.email) {
         const nextAgents = agents.map((item) => item.id === agentId ? { ...item, present: nextPresent } : item)
-        setClientCache(`staffing:all-agents:${user.email}`, { agents: nextAgents, supervisors }, STAFFING_CACHE_TTL_MS)
+        setClientCache(getStaffingCacheKey(user.email), { agents: nextAgents, supervisors }, STAFFING_CACHE_TTL_MS)
       }
     } catch (updateError: any) {
       setAgents((current) =>
@@ -466,6 +488,7 @@ export default function StaffingPage() {
           </h1>
           <p className="mt-2 max-w-2xl text-on-surface-variant">
             View scheduled agents by team leader. Presence is pulled from the agents roster and can be toggled here for the current shift.
+            Confirmed absences reset daily at 6:00 AM Eastern Time.
           </p>
         </div>
 

@@ -190,6 +190,7 @@ export type Database = {
           end_shift: string | null
           comments: string | null
           present: boolean | null
+          presence_updated_at: string | null
         }
         Insert: {
           name: string
@@ -202,6 +203,7 @@ export type Database = {
           end_shift?: string | null
           comments?: string | null
           present?: boolean | null
+          presence_updated_at?: string | null
         }
         Update: {
           name?: string
@@ -214,6 +216,7 @@ export type Database = {
           end_shift?: string | null
           comments?: string | null
           present?: boolean | null
+          presence_updated_at?: string | null
         }
       }
       tickets: {

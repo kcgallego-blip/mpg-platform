@@ -13,6 +13,7 @@ import {
   STATS_SUMMARY_FIELDS,
   type StatsSummaryRow,
 } from '@/lib/statsSummary'
+import { getHistoricalStatsTeamLeader } from '@/lib/statsHistory'
 import type { Database } from '@/types/database'
 
 const MAX_PAGE_SIZE = 50
@@ -224,6 +225,12 @@ export async function GET(request: NextRequest) {
           identityNames: agentIdentityNames,
         })
       : null
+    const historicalAgentIdentity = isAgent && !agentRosterIdentity?.teamLeader
+      ? await getHistoricalStatsTeamLeader([resolvedAgentName, ...agentIdentityNames])
+      : null
+    const agentTeamLeader = agentRosterIdentity?.teamLeader
+      || historicalAgentIdentity?.teamLeader
+      || null
 
     // Validate sort parameters
     const validSortFields = [
@@ -371,15 +378,15 @@ export async function GET(request: NextRequest) {
     let agentTeamSummary: StatsSummaryRow | null = null
     let agentTeamSummaryRowCount = 0
 
-    if (isAgent && agentRosterIdentity?.teamLeader) {
+    if (isAgent && agentTeamLeader) {
       // Agents receive aggregate metrics only. Team membership is identified by
-      // their current roster leader, while each period's stored stats remain an
-      // immutable snapshot and are never rewritten from the roster at read time.
+      // the current roster when available, otherwise by the newest historical
+      // Stats snapshot for agents who are no longer in the roster.
       const teamSummaryRows = await fetchStatsSummaryRows({
         isMonthly,
         periodValue: selectedPeriodValue,
         selectedRange,
-        supervisor: agentRosterIdentity.teamLeader,
+        supervisor: agentTeamLeader,
       })
       agentTeamSummary = averageStatsSummary(teamSummaryRows)
       agentTeamSummaryRowCount = teamSummaryRows.length
@@ -425,7 +432,7 @@ export async function GET(request: NextRequest) {
       summaryRowCount,
       agentTeamSummary,
       agentTeamSummaryRowCount,
-      agentTeamLeader: isAgent ? agentRosterIdentity?.teamLeader || null : null,
+      agentTeamLeader: isAgent ? agentTeamLeader : null,
       supervisors,
       userRole,
       userName,

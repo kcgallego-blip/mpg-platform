@@ -6,10 +6,10 @@ import {
   getStatsNameAnchorTokens,
   getStatsNameSearchFragments,
   getUniqueStatsIdentityNames,
-  resolveRosterScopedAgentNames,
+  resolveHistoricalAgentNames,
   resolveStatsNameFromCandidates,
 } from '../lib/statsIdentity.ts'
-import { resolveStatsRosterEntry } from '../lib/statsRoster.ts'
+import { resolveStatsRosterEntry, resolveStatsTeamLeader } from '../lib/statsRoster.ts'
 
 test('Agent scorecards bypass the stats response cache', () => {
   assert.equal(shouldCacheRoleScopedData('Agent'), false)
@@ -54,32 +54,19 @@ test('canonical roster identity is used when the profile name does not match', (
   )
 })
 
-test('authenticated profile identity wins over a conflicting email-linked roster fallback', () => {
+test('historical agent identity resolution does not require a current roster entry', () => {
   assert.deepEqual(
-    resolveRosterScopedAgentNames(
-      ['John Velasquez', 'John Louis Soriano'],
-      ['John Emmanuel Velasquez', 'John Louis Soriano'],
-      ['John Emmanuel Velasquez', 'John Louis Soriano']
+    resolveHistoricalAgentNames(
+      ['Former Agent', 'Current Agent'],
+      ['Former Agent']
     ),
-    ['John Velasquez']
-  )
-})
-
-test('multiple source aliases are allowed only when they uniquely map to one roster agent', () => {
-  assert.deepEqual(
-    resolveRosterScopedAgentNames(
-      ['Nino Candare', 'Nino C Candare'],
-      ['Nino Candare'],
-      ['Nino Candare', 'Nina Candare']
-    ),
-    ['Nino Candare', 'Nino C Candare']
+    ['Former Agent']
   )
 
   assert.deepEqual(
-    resolveRosterScopedAgentNames(
+    resolveHistoricalAgentNames(
       ['John David Santos', 'John Paul Santos'],
-      ['John Santos'],
-      ['John David Santos', 'John Paul Santos']
+      ['John Santos']
     ),
     []
   )
@@ -129,6 +116,43 @@ test('stats roster matching rejects ambiguous names and missing team leaders', (
       status: 'missing_team_leader',
       rosterName: 'Maria Cruz',
     }
+  )
+})
+
+test('stats team leaders fall back from roster to history and then CSV', () => {
+  const roster = [
+    { name: 'Current Agent', team_leader: 'Current Leader' },
+    { name: 'Former Agent', team_leader: null },
+  ]
+
+  assert.deepEqual(
+    resolveStatsTeamLeader({
+      csvName: 'Current Agent',
+      csvTeamLeader: 'CSV Leader',
+      roster,
+      historicalTeamLeader: 'Historical Leader',
+    }),
+    { status: 'matched', teamLeader: 'Current Leader', source: 'roster' }
+  )
+
+  assert.deepEqual(
+    resolveStatsTeamLeader({
+      csvName: 'Former Agent',
+      csvTeamLeader: 'CSV Leader',
+      roster,
+      historicalTeamLeader: 'Historical Leader',
+    }),
+    { status: 'matched', teamLeader: 'Historical Leader', source: 'history' }
+  )
+
+  assert.deepEqual(
+    resolveStatsTeamLeader({
+      csvName: 'Unlisted Agent',
+      csvTeamLeader: 'CSV Leader',
+      roster,
+      historicalTeamLeader: null,
+    }),
+    { status: 'matched', teamLeader: 'CSV Leader', source: 'csv' }
   )
 })
 

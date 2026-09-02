@@ -176,6 +176,8 @@ export interface Database {
           start_shift: string | null
           end_shift: string | null
           comments: string | null
+          present: boolean | null
+          presence_updated_at: string | null
         }
         Insert: {
           name: string
@@ -187,6 +189,8 @@ export interface Database {
           start_shift?: string | null
           end_shift?: string | null
           comments?: string | null
+          present?: boolean | null
+          presence_updated_at?: string | null
         }
         Update: {
           name?: string
@@ -198,6 +202,8 @@ export interface Database {
           start_shift?: string | null
           end_shift?: string | null
           comments?: string | null
+          present?: boolean | null
+          presence_updated_at?: string | null
         }
       }
       tickets: {

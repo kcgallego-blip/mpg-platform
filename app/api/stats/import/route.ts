@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { STATS_COLUMNS, STATS_MONTH_COLUMNS } from '@/lib/dbColumns'
 import { getAuthenticatedDbUser } from '@/lib/sessionAuth'
 import { canUploadStats } from '@/lib/statsAccess'
-import { resolveStatsRosterEntry, type StatsRosterEntry } from '@/lib/statsRoster'
+import { getHistoricalStatsTeamLeader } from '@/lib/statsHistory'
+import {
+  resolveStatsRosterEntry,
+  resolveStatsTeamLeader,
+  type StatsRosterEntry,
+} from '@/lib/statsRoster'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 
 const parseWeek = (value: unknown) => {
@@ -104,10 +109,8 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Fetch the authoritative roster once, then resolve every CSV name locally.
-    // The CSV Supervisor column is intentionally ignored. The resolved leader is
-    // stored with this import as a historical snapshot; stats reads do not join
-    // back to the roster, so later roster changes do not rewrite older periods.
+    // The roster is an optional source of current team-leader data, not an
+    // allowlist. Agents who have left the roster remain valid historical rows.
     const { data: rosterData, error: rosterError } = await supabaseAdmin
       .from('agents')
       .select('name, team_leader')
@@ -126,33 +129,53 @@ export async function POST(request: NextRequest) {
       }))
       .filter((agent): agent is StatsRosterEntry => Boolean(agent.name))
 
-    const resolvedRecords = recordsWithNames.map(({ record, rowNumber }) => ({
-      record,
-      rowNumber,
-      resolution: resolveStatsRosterEntry(record.Name.trim(), roster),
-    }))
-    const validationErrors = resolvedRecords.flatMap(({ record, rowNumber, resolution }) => {
-      if (resolution.status === 'matched') return []
-      if (resolution.status === 'ambiguous') {
-        return [`Row ${rowNumber}: "${record.Name}" matches multiple agents: ${resolution.candidates.join(', ')}`]
-      }
-      if (resolution.status === 'missing_team_leader') {
-        return [`Row ${rowNumber}: "${record.Name}" matched "${resolution.rosterName}", but that agent has no Team Leader`]
-      }
-      return [`Row ${rowNumber}: "${record.Name}" did not match an agent in the roster`]
-    })
+    const resolvedRecords: Array<{
+      record: any
+      rowNumber: number
+      resolution: ReturnType<typeof resolveStatsTeamLeader>
+    }> = []
+    const resolutionBatchSize = 10
+
+    for (let index = 0; index < recordsWithNames.length; index += resolutionBatchSize) {
+      const batch = recordsWithNames.slice(index, index + resolutionBatchSize)
+      const resolvedBatch = await Promise.all(batch.map(async ({ record, rowNumber }) => {
+        const rosterResolution = resolveStatsRosterEntry(record.Name.trim(), roster)
+        const historicalIdentity = rosterResolution.status === 'matched'
+          ? null
+          : await getHistoricalStatsTeamLeader([record.Name])
+
+        return {
+          record,
+          rowNumber,
+          resolution: resolveStatsTeamLeader({
+            csvName: record.Name.trim(),
+            csvTeamLeader: record.Supervisor,
+            roster,
+            historicalTeamLeader: historicalIdentity?.teamLeader,
+          }),
+        }
+      }))
+      resolvedRecords.push(...resolvedBatch)
+    }
+
+    const validationErrors = resolvedRecords.flatMap(({ record, rowNumber, resolution }) =>
+      resolution.status === 'matched'
+        ? []
+        : [`Row ${rowNumber}: "${record.Name}" has no Team Leader in the roster, historical Stats data, or CSV Supervisor column`]
+    )
 
     if (validationErrors.length > 0) {
       return NextResponse.json(
         {
-          error: `Agent roster validation failed for ${validationErrors.length} row${validationErrors.length === 1 ? '' : 's'}. No Stats data was changed.`,
+          error: `Team Leader resolution failed for ${validationErrors.length} row${validationErrors.length === 1 ? '' : 's'}. No Stats data was changed.`,
           errors: validationErrors,
         },
         { status: 422 }
       )
     }
 
-    // Convert to database format only after the entire roster has been validated.
+    // Convert only after every row has a team leader from the roster, historical
+    // Stats data, or the uploaded CSV (in that priority order).
     const dbRecords = resolvedRecords.map(({ record: r, resolution }) => {
       if (resolution.status !== 'matched') {
         throw new Error('Unexpected unresolved roster entry after validation')

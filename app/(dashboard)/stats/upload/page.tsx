@@ -225,8 +225,8 @@ export default function StatsUploadPage() {
             Upload Stats Data
           </h1>
           <p className="mt-2 max-w-3xl text-on-surface-variant">
-            Import agent performance metrics from a CSV file. Each Name is matched against the agent roster, and the Team Leader is taken from the roster rather than the CSV.
-            The assignment is saved with the selected period, so later roster changes do not alter previously uploaded stats.
+            Import agent performance metrics from a CSV file. Agents do not need to exist in the current roster.
+            Team Leader is taken from the roster when available, then historical Stats data, then the CSV Supervisor column.
           </p>
         </div>
         <Link
@@ -467,8 +467,8 @@ export default function StatsUploadPage() {
             <tbody>
               <tr className="border-b border-outline-variant/30">
                 <td className="px-4 py-2 text-on-surface">Supervisor</td>
-                <td className="px-4 py-2 text-on-surface-variant">Ignored</td>
-                <td className="px-4 py-2 text-on-surface-variant">Team Leader comes from the agent roster</td>
+                <td className="px-4 py-2 text-on-surface-variant">Fallback text</td>
+                <td className="px-4 py-2 text-on-surface-variant">Used when roster and historical Stats have no Team Leader</td>
               </tr>
               <tr className="border-b border-outline-variant/30">
                 <td className="px-4 py-2 text-on-surface">Name</td>

@@ -8,7 +8,6 @@ import AgentReconciliationModal, {
   ReconciliationPlan,
 } from '@/components/agents/AgentReconciliationModal'
 import {
-  EXPECTED_AGENT_IMPORT_FILE,
   ImportedAgent,
   ImportedAgentMatch,
   matchImportedAgents,
@@ -28,7 +27,7 @@ import {
 
 type AgentRow = Database['public']['Tables']['agents']['Row']
 type AgentInsert = Database['public']['Tables']['agents']['Insert']
-type AgentField = keyof Omit<AgentInsert, 'present'>
+type AgentField = keyof Omit<AgentInsert, 'present' | 'presence_updated_at'>
 type AgentFormField = Exclude<AgentField, 'name'>
 
 type ImportPreview = {
@@ -402,9 +401,6 @@ export default function AgentsPage() {
     try {
       setError(null)
       setSuccessMessage(null)
-      if (file.name !== EXPECTED_AGENT_IMPORT_FILE) {
-        throw new Error(`Select the schedule file named exactly "${EXPECTED_AGENT_IMPORT_FILE}"`)
-      }
 
       const arrayBuffer = await file.arrayBuffer()
       const workbook = XLSX.read(arrayBuffer, { type: 'array' })

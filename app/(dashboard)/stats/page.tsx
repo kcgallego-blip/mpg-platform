@@ -1020,7 +1020,7 @@ export default function StatsPage() {
                     ? ``
                     : agentTeamLeader
                       ? `No team metrics are available for ${periodLabel}.`
-                      : 'Your roster record does not currently have a team leader assigned.'}
+                      : 'No team leader was found in the roster or historical Stats data.'}
                 </p>
               </div>
 

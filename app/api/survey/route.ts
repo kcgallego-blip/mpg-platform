@@ -4,7 +4,7 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin'
 import {
   getStatsNameSearchFragments,
   getUniqueStatsIdentityNames,
-  resolveRosterScopedAgentNames,
+  resolveHistoricalAgentNames,
 } from '@/lib/statsIdentity'
 
 const MIN_SURVEY_WEEK = 27
@@ -137,21 +137,6 @@ const getPeriodRange = (periodType: PeriodType, value: string) => {
   return { from: toDateKey(from), to: toDateKey(to) }
 }
 
-async function getCanonicalAgentName(email: string) {
-  const { data, error } = await supabaseAdmin
-    .from('agents')
-    .select('name')
-    .ilike('email', email.trim())
-    .limit(1)
-
-  if (error) {
-    console.error('Survey canonical agent lookup error:', error)
-    return null
-  }
-
-  return data?.[0]?.name?.trim() || null
-}
-
 async function resolveSurveyAgentNames(identityNames: string[]) {
   const candidateSet = new Set<string>()
 
@@ -190,13 +175,7 @@ async function resolveSurveyAgentNames(identityNames: string[]) {
   const candidates = Array.from(candidateSet)
   if (candidates.length === 0) return []
 
-  const rosterResult = await supabaseAdmin.from('agents').select('name')
-  if (rosterResult.error) throw rosterResult.error
-  const rosterNames = ((rosterResult.data || []) as Array<{ name?: string | null }>)
-    .map(row => row.name?.trim())
-    .filter((name): name is string => Boolean(name))
-
-  return resolveRosterScopedAgentNames(candidates, identityNames, rosterNames)
+  return resolveHistoricalAgentNames(candidates, identityNames)
 }
 
 async function getSurveyPeriodDates(agentName: string | null) {
@@ -282,9 +261,8 @@ export async function GET(request: NextRequest) {
     const userRole = dbUser.role || 'Agent'
     const userName = dbUser.name || ''
     const isAgent = userRole.trim().toLowerCase() === 'agent'
-    const canonicalAgentName = isAgent ? await getCanonicalAgentName(dbUser.email) : null
     const agentIdentityNames = isAgent
-      ? getUniqueStatsIdentityNames([userName, canonicalAgentName])
+      ? getUniqueStatsIdentityNames([userName])
       : []
     const resolvedAgentNames = isAgent && agentIdentityNames.length > 0
       ? await resolveSurveyAgentNames(agentIdentityNames)

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthenticatedDbUser } from '@/lib/sessionAuth'
+import { getLatestStaffingResetBoundary } from '@/lib/staffingPresence'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 
 export const dynamic = 'force-dynamic'
@@ -25,6 +26,19 @@ export async function GET(request: NextRequest) {
     if (!user?.is_active) {
       return NextResponse.json({ error: 'Authentication required' }, { status: 401 })
     }
+
+    const now = new Date()
+    const resetBoundary = getLatestStaffingResetBoundary(now)
+    const { error: resetError } = await supabaseAdmin
+      .from('agents')
+      .update({
+        present: true,
+        presence_updated_at: now.toISOString(),
+      })
+      .eq('present', false)
+      .or(`presence_updated_at.is.null,presence_updated_at.lt.${resetBoundary.toISOString()}`)
+
+    if (resetError) throw resetError
 
     const { data, error } = await supabaseAdmin
       .from('agents')
@@ -96,7 +110,10 @@ export async function PATCH(request: NextRequest) {
 
     const { error } = await supabaseAdmin
       .from('agents')
-      .update({ present })
+      .update({
+        present,
+        presence_updated_at: new Date().toISOString(),
+      })
       .eq('name', agentName)
 
     if (error) throw error

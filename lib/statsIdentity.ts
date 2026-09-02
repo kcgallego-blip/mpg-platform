@@ -185,47 +185,12 @@ export const resolveStatsNameFromCandidates = (
   return null
 }
 
-export const resolveRosterScopedAgentNames = (
+export const resolveHistoricalAgentNames = (
   candidates: string[],
-  identityNames: string[],
-  rosterNames: string[]
+  identityNames: string[]
 ) => {
-  const matchingCandidates = candidates.filter(candidate =>
-    identityNames.some(identityName =>
-      getStatsNameMatchScore(candidate, identityName) >= STATS_NAME_MATCH_THRESHOLD
-    )
-  )
-
-  for (const identityName of getUniqueStatsIdentityNames(identityNames)) {
-    const identityCandidates = matchingCandidates.filter(candidate =>
-      getStatsNameMatchScore(candidate, identityName) >= STATS_NAME_MATCH_THRESHOLD
-    )
-    const targetRosterName = resolveStatsNameFromCandidates(rosterNames, [identityName])
-
-    if (!targetRosterName) {
-      const resolvedName = resolveStatsNameFromCandidates(identityCandidates, [identityName])
-      if (resolvedName) return [resolvedName]
-      continue
-    }
-
-    const normalizedTargetRosterName = normalizeStatsName(targetRosterName)
-    const safeAliases = identityCandidates.filter(candidate => {
-      const scoredRosterNames = rosterNames.map(name => ({
-        name,
-        score: getStatsNameMatchScore(candidate, name),
-      }))
-      const bestScore = Math.max(0, ...scoredRosterNames.map(match => match.score))
-      const bestMatches = scoredRosterNames.filter(match => match.score === bestScore)
-
-      return bestScore >= STATS_NAME_MATCH_THRESHOLD &&
-        bestMatches.length === 1 &&
-        normalizeStatsName(bestMatches[0].name) === normalizedTargetRosterName
-    })
-
-    if (safeAliases.length > 0) return safeAliases
-  }
-
-  return []
+  const resolvedName = resolveStatsNameFromCandidates(candidates, identityNames)
+  return resolvedName ? [resolvedName] : []
 }
 
 export const getAgentStatsFallbackPeriod = (

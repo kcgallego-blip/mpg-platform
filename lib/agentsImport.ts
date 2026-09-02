@@ -1,5 +1,3 @@
-export const EXPECTED_AGENT_IMPORT_FILE = "AUGUST SCHEDULE - August' 26 Schedule.csv"
-
 export const AGENT_IMPORT_FIELDS = [
   'name',
   'email',
@@ -221,7 +219,7 @@ const findHeader = (matrix: unknown[][]): HeaderCandidate => {
 
   if (!bestCandidate) {
     throw new Error(
-      'Could not find the August schedule header row. Expected Name, Email, Team Leader, Role, days off, shift, and comments columns.'
+      'Could not find the schedule header row. Expected Name, Email, Team Leader, Role, days off, shift, and comments columns.'
     )
   }
 
