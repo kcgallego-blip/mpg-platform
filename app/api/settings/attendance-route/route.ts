@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { ATTENDANCE_ROUTE_SETTING_KEY, canRoleAccessAttendance } from '@/lib/featureAccess'
-import { getAttendanceRouteEnabled } from '@/lib/featureSettings'
+import {
+  ATTENDANCE_ALWAYS_VISIBLE_LOCALLY,
+  ATTENDANCE_ROUTE_SETTING_KEY,
+  canRoleAccessAttendance,
+} from '@/lib/featureAccess'
+import { canUserAccessAttendance, getAttendanceRouteEnabled } from '@/lib/featureSettings'
 import { getAuthenticatedDbUser } from '@/lib/sessionAuth'
 import { supabaseAdmin } from '@/lib/supabaseAdmin'
 
@@ -10,9 +14,13 @@ const noStoreHeaders = {
   'Cache-Control': 'no-store, max-age=0',
 }
 
-const toResponse = (role: string | null, attendanceRouteEnabled: boolean) => ({
+const toResponse = (role: string | null, attendanceRouteEnabled: boolean, canAccessAttendance?: boolean) => ({
   attendanceRouteEnabled,
-  canAccessAttendance: canRoleAccessAttendance(role, attendanceRouteEnabled),
+  canAccessAttendance: canAccessAttendance ?? canRoleAccessAttendance(
+    role,
+    attendanceRouteEnabled,
+    ATTENDANCE_ALWAYS_VISIBLE_LOCALLY
+  ),
   isAdmin: role === 'Admin',
 })
 
@@ -29,7 +37,7 @@ export async function GET(request: NextRequest) {
 
     const attendanceRouteEnabled = await getAttendanceRouteEnabled()
 
-    return NextResponse.json(toResponse(user.role, attendanceRouteEnabled), {
+    return NextResponse.json(toResponse(user.role, attendanceRouteEnabled, await canUserAccessAttendance(user.role, user.email)), {
       headers: noStoreHeaders,
     })
   } catch (error) {

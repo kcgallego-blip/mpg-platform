@@ -4,6 +4,7 @@ import { useEffect } from 'react'
 import { AlertCircle, CheckCircle2, SlidersHorizontal } from 'lucide-react'
 import { useAuthStore } from '@/lib/authStore'
 import { useFeatureSettingsStore } from '@/lib/featureSettingsStore'
+import AttendanceClockPilotControls from '@/components/attendance/AttendanceClockPilotControls'
 
 export default function ControlsPage() {
   const user = useAuthStore((state) => state.user)
@@ -177,6 +178,7 @@ export default function ControlsPage() {
           )}
         </div>
       </section>
+      {user?.role === 'Admin' && <AttendanceClockPilotControls />}
     </div>
   )
 }

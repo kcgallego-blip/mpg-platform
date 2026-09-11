@@ -62,4 +62,19 @@ export const changelogReleases = [
       fixed: [],
     },
   },
+  {
+    sequence: 4,
+    version: '1.2.0',
+    title: 'AI guidance and agent coaching insights',
+    publishedAt: '2026-09-12T10:00:00.000Z',
+    changes: {
+      added: [
+        'Agents now receive personalized AI-powered guidance on the Home page based on their latest available work insights (BETA TEST).',
+        'Team leaders can now use Agent Insight to review agent performance, strengths, and improvement priorities.',
+        'Selected agents for pilot testing of attendance management. (BETA TEST)',
+      ],
+      improved: [],
+      fixed: [],
+    },
+  },
 ] as const satisfies readonly ChangelogRelease[]

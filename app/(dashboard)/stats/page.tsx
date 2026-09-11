@@ -25,8 +25,8 @@ import {
   getStatsWeekRangeLabel,
   isScorePassing,
   isNAField,
+  formatStatPercentage,
   formatStatValue,
-  parsePercentage,
 } from '@/lib/statsUtils'
 
 type Stat = {
@@ -254,7 +254,7 @@ export default function StatsPage() {
         pageSize: String(STATS_PAGE_SIZE),
       })
 
-      const cacheKey = `stats:v5:${user.email}:${queryParams.toString()}`
+      const cacheKey = `stats:v6:${user.email}:${queryParams.toString()}`
       const shouldUseCache = shouldCacheRoleScopedData(user.role)
       let data = shouldUseCache ? getClientCache<StatsResponse>(cacheKey) : null
 
@@ -282,7 +282,12 @@ export default function StatsPage() {
       setAgentTeamSummaryRowCount(data.agentTeamSummaryRowCount || 0)
       setAgentTeamLeader(data.agentTeamLeader || null)
       setTotalStatsRows(data.total || 0)
-      setSupervisors(data.supervisors || [])
+      const rosterSupervisors = data.supervisors || []
+      setSupervisors(rosterSupervisors)
+      if (selectedSupervisor !== 'all' && !rosterSupervisors.includes(selectedSupervisor)) {
+        setCurrentPage(1)
+        setSelectedSupervisor('all')
+      }
       setDisplayedRange(data.range || getStatsWeekRange())
       setUserRole(data.userRole)
       const normalizedAvailablePeriods = Array.isArray(data.availablePeriods)
@@ -408,6 +413,10 @@ export default function StatsPage() {
   }
 
   const formatAgentMetricValue = (fieldName: string, value: string | number | null | undefined) => {
+    if (fieldName === 'csat_score') {
+      return formatStatPercentage(value, 2) || formatStatValue(value, fieldName)
+    }
+
     const formattedValue = formatStatValue(value, fieldName)
     if (fieldName === 'tph' && formattedValue !== 'Not available') {
       const numericValue = Number(formattedValue)
@@ -418,13 +427,7 @@ export default function StatsPage() {
 
   const formatLeaderMetricValue = (fieldName: string, value: string | number | null | undefined) => {
     if (fieldName === 'csat_score') {
-      let percentage = typeof value === 'string' ? parsePercentage(value) : value
-      if (typeof percentage === 'number' && percentage > 0 && percentage < 1) {
-        percentage *= 100
-      }
-      if (typeof percentage === 'number' && Number.isFinite(percentage)) {
-        return `${percentage.toFixed(2)}%`
-      }
+      return formatStatPercentage(value, 2) || formatAgentMetricValue(fieldName, value)
     }
 
     if (fieldName === 'tph') {

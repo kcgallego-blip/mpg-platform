@@ -2,7 +2,8 @@ import Link from 'next/link'
 import { useAuthStore } from '@/lib/authStore'
 import { useFeatureSettingsStore } from '@/lib/featureSettingsStore'
 import { getPostLoginRoute } from '@/lib/routes'
-import { User, LayoutDashboard, Ticket, FileText, ChevronDown, ChevronRight, Users, BarChart3, TrendingUp, Wrench, MessageSquareText, CalendarClock, SlidersHorizontal, BookOpen, History } from 'lucide-react'
+import { ATTENDANCE_ALWAYS_VISIBLE_LOCALLY } from '@/lib/featureAccess'
+import { User, LayoutDashboard, Ticket, FileText, ChevronDown, ChevronRight, Users, BarChart3, TrendingUp, Wrench, MessageSquareText, CalendarClock, SlidersHorizontal, BookOpen, History, House, BrainCircuit } from 'lucide-react'
 import { useState, useEffect, type ComponentType } from 'react'
 import Image from 'next/image'
 
@@ -15,6 +16,7 @@ const allNavItems: NavItem[] = [
   { href: '/support', icon: BookOpen, label: 'Support' },
   { href: '/suggestions', icon: MessageSquareText, label: 'Suggestions' },
   { href: '/stats', icon: TrendingUp, label: 'Stats' },
+  { href: '/agent-insight', icon: BrainCircuit, label: 'Agent Insight' },
   { href: '/survey', icon: MessageSquareText, label: 'Survey' },
   { href: '/productivity', icon: BarChart3, label: 'Productivity' },
   {
@@ -41,6 +43,7 @@ const managerNavItems: NavItem[] = [
   { href: '/staffing', icon: LayoutDashboard, label: 'Staffing' },
   { href: '/support', icon: BookOpen, label: 'Support' },
   { href: '/stats', icon: TrendingUp, label: 'Stats' },
+  { href: '/agent-insight', icon: BrainCircuit, label: 'Agent Insight' },
   { href: '/survey', icon: MessageSquareText, label: 'Survey' },
   { href: '/productivity', icon: BarChart3, label: 'Productivity' },
   {
@@ -54,7 +57,7 @@ const managerNavItems: NavItem[] = [
 ]
 
 const itNavItems: NavItem[] = [
-  ...managerNavItems,
+  ...managerNavItems.filter(item => !('href' in item && item.href === '/agent-insight')),
   {
     label: 'Utilities',
     icon: Wrench,
@@ -65,6 +68,7 @@ const itNavItems: NavItem[] = [
 ]
 
 const agentNavItems: NavItem[] = [
+  { href: '/home', icon: House, label: 'Home' },
   { href: '/agent', icon: LayoutDashboard, label: 'Agent' },
   { href: '/support', icon: BookOpen, label: 'Support' },
   { href: '/suggestions', icon: MessageSquareText, label: 'Suggestions' },
@@ -119,6 +123,7 @@ export default function Navigation() {
   const loadFeatureSettings = useFeatureSettingsStore((state) => state.load)
 
   const showAttendance =
+    (ATTENDANCE_ALWAYS_VISIBLE_LOCALLY && Boolean(user?.role)) ||
     user?.role === 'Admin' ||
     (settingsLoadedFor === user?.email && canAccessAttendance)
   const navItems = getNavItemsByRole(user?.role, showAttendance)

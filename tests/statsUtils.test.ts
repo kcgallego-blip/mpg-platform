@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { canUploadStats } from '../lib/statsAccess.ts'
 import {
+  formatStatPercentage,
   formatStatValue,
   getStatsMonthOptions,
   getStatsWeekOptions,
@@ -65,4 +66,10 @@ test('TPH is rounded to a whole number by the shared stats formatter', () => {
   assert.equal(formatStatValue(5.5, 'tph'), '6')
   assert.equal(formatStatValue('7.8', 'tph'), '8')
   assert.equal(formatStatValue('-', 'tph'), 'Not available')
+})
+
+test('agent CSAT percentages can be displayed with two decimal places', () => {
+  assert.equal(formatStatPercentage('87.456%', 2), '87.46%')
+  assert.equal(formatStatPercentage(0.9, 2), '90.00%')
+  assert.equal(formatStatPercentage(null, 2), null)
 })

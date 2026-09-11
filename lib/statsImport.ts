@@ -8,6 +8,7 @@
 
 import { supabase } from './supabase'
 import { STATS_COLUMNS } from './dbColumns'
+import { getStatsCsvValue } from './statsCsv'
 import { getStatsWeekNumber, getStatsWeekRange } from './statsUtils'
 
 export interface CSVStat {
@@ -18,8 +19,10 @@ export interface CSVStat {
   Hold?: string
   'Talk Time'?: string
   CSAT_Score?: string
+  CSAT?: string
   DSAT?: string
   NPS_Score?: string
+  NPS?: string
   'Promoter (*)'?: string
   MOD?: string
   'MOD (*)'?: string
@@ -68,9 +71,9 @@ function convertToDbFormat(csvStat: CSVStat, week: number, range: number) {
     aht: csvStat.AHT || null,
     hold: csvStat.Hold || null,
     talk_time: csvStat['Talk Time'] || null,
-    csat_score: csvStat.CSAT_Score || null,
+    csat_score: getStatsCsvValue(csvStat, 'CSAT_Score', 'CSAT'),
     dsat: csvStat.DSAT || null,
-    nps_score: parseFloat(csvStat.NPS_Score || '0') || null,
+    nps_score: parseFloat(getStatsCsvValue(csvStat, 'NPS_Score', 'NPS') || '0') || null,
     promoter: parseInt(csvStat['Promoter (*)'] || '0') || null,
     mod: csvStat.MOD || null,
     mod_value: parseInt(csvStat['MOD (*)'] || '0') || null,

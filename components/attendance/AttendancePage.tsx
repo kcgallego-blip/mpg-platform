@@ -3,19 +3,20 @@
 import { ShieldX } from 'lucide-react'
 import { useAuthStore } from '@/lib/authStore'
 import { getDefaultShiftDate } from '@/lib/attendance'
+import { canManageAttendance } from '@/lib/attendanceAccess'
 import AgentCalendarView from './AgentCalendarView'
-import TeamAttendanceListView from './TeamAttendanceListView'
+import AttendanceManagementWorkspace from './AttendanceManagementWorkspace'
 
 export default function AttendancePage() {
   const user = useAuthStore((state) => state.user)
   const currentShiftDate = getDefaultShiftDate()
 
-  if (user?.role === 'Agent') {
+  if (user?.role?.trim().toLowerCase() === 'agent') {
     return <AgentCalendarView currentShiftDate={currentShiftDate} />
   }
 
-  if (user?.role) {
-    return <TeamAttendanceListView currentShiftDate={currentShiftDate} />
+  if (canManageAttendance(user?.role)) {
+    return <AttendanceManagementWorkspace currentShiftDate={currentShiftDate} />
   }
 
   return (

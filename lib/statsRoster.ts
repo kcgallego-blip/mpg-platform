@@ -19,6 +19,45 @@ export type StatsTeamLeaderResolution =
   | { status: 'matched'; teamLeader: string; source: 'roster' | 'history' | 'csv' }
   | { status: 'missing' }
 
+const normalizeStatsTeamLeader = (value: string | null | undefined) =>
+  (value || '').trim().toLocaleLowerCase()
+
+export const getStatsRosterTeamLeaders = (roster: StatsRosterEntry[]) => {
+  const leadersByNormalizedName = new Map<string, string>()
+
+  roster.forEach(agent => {
+    const teamLeader = agent.team_leader?.trim()
+    const normalizedTeamLeader = normalizeStatsTeamLeader(teamLeader)
+
+    if (teamLeader && normalizedTeamLeader && !leadersByNormalizedName.has(normalizedTeamLeader)) {
+      leadersByNormalizedName.set(normalizedTeamLeader, teamLeader)
+    }
+  })
+
+  return Array.from(leadersByNormalizedName.values()).sort((first, second) =>
+    first.localeCompare(second, undefined, { sensitivity: 'base' })
+  )
+}
+
+export const getStatsNamesForRosterTeam = (
+  statsNames: string[],
+  roster: StatsRosterEntry[],
+  teamLeader: string
+) => {
+  const normalizedTeamLeader = normalizeStatsTeamLeader(teamLeader)
+
+  return Array.from(new Set(
+    statsNames
+      .map(name => name.trim())
+      .filter(Boolean)
+      .filter(statsName => {
+        const resolution = resolveStatsRosterEntry(statsName, roster)
+        return resolution.status === 'matched'
+          && normalizeStatsTeamLeader(resolution.teamLeader) === normalizedTeamLeader
+      })
+  ))
+}
+
 export const resolveStatsRosterEntry = (
   csvName: string,
   roster: StatsRosterEntry[]

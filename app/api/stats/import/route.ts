@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { STATS_COLUMNS, STATS_MONTH_COLUMNS } from '@/lib/dbColumns'
 import { getAuthenticatedDbUser } from '@/lib/sessionAuth'
 import { canUploadStats } from '@/lib/statsAccess'
+import { getStatsCsvValue } from '@/lib/statsCsv'
 import { getHistoricalStatsTeamLeader } from '@/lib/statsHistory'
 import {
   resolveStatsRosterEntry,
@@ -181,6 +182,9 @@ export async function POST(request: NextRequest) {
         throw new Error('Unexpected unresolved roster entry after validation')
       }
 
+      const csatScore = getStatsCsvValue(r, 'CSAT_Score', 'CSAT')
+      const npsScore = getStatsCsvValue(r, 'NPS_Score', 'NPS')
+
       return {
         supervisor: resolution.teamLeader,
         name: r.Name,
@@ -188,9 +192,9 @@ export async function POST(request: NextRequest) {
         aht: r.AHT || null,
         hold: r.Hold || null,
         talk_time: r['Talk Time'] || null,
-        csat_score: r.CSAT_Score || null,
+        csat_score: csatScore,
         dsat: r.DSAT || null,
-        nps_score: r.NPS_Score ? parseFloat(r.NPS_Score) : null,
+        nps_score: npsScore ? parseFloat(npsScore) : null,
         promoter: r['Promoter (*)'] ? parseInt(r['Promoter (*)']) : null,
         mod: r.MOD || null,
         mod_value: r['MOD (*)'] ? parseInt(r['MOD (*)']) : null,

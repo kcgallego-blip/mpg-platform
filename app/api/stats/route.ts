@@ -14,10 +14,16 @@ import {
   type StatsSummaryRow,
 } from '@/lib/statsSummary'
 import { getHistoricalStatsTeamLeader } from '@/lib/statsHistory'
+import {
+  getStatsNamesForRosterTeam,
+  getStatsRosterTeamLeaders,
+  type StatsRosterEntry,
+} from '@/lib/statsRoster'
 import type { Database } from '@/types/database'
 
 const MAX_PAGE_SIZE = 50
 const SUMMARY_BATCH_SIZE = 1000
+const NO_STATS_NAME_MATCH = '__mpg_no_stats_name_match__'
 type StatsRow = Database['public']['Tables']['stats']['Row']
 
 const fetchStatsSummaryRows = async ({
@@ -25,11 +31,13 @@ const fetchStatsSummaryRows = async ({
   periodValue,
   selectedRange,
   supervisor,
+  agentNames,
 }: {
   isMonthly: boolean
   periodValue: number
   selectedRange: number
   supervisor: string | null
+  agentNames?: string[] | null
 }) => {
   const rows: Partial<StatsSummaryRow>[] = []
   let offset = 0
@@ -43,7 +51,11 @@ const fetchStatsSummaryRows = async ({
       ? summaryQuery.eq('month', String(periodValue))
       : summaryQuery.eq('week', periodValue).eq('range', selectedRange)
 
-    if (supervisor && supervisor !== 'all') {
+    if (agentNames) {
+      summaryQuery = agentNames.length > 0
+        ? summaryQuery.in('name', agentNames)
+        : summaryQuery.eq('name', NO_STATS_NAME_MATCH)
+    } else if (supervisor && supervisor !== 'all') {
       summaryQuery = summaryQuery.eq('supervisor', supervisor)
     }
 
@@ -58,6 +70,40 @@ const fetchStatsSummaryRows = async ({
   }
 
   return rows
+}
+
+const fetchStatsNamesForPeriod = async ({
+  isMonthly,
+  periodValue,
+}: {
+  isMonthly: boolean
+  periodValue: number
+}) => {
+  const names: string[] = []
+  let offset = 0
+
+  while (true) {
+    let namesQuery = supabaseAdmin
+      .from(isMonthly ? 'stats_month' : 'stats')
+      .select('name')
+
+    namesQuery = isMonthly
+      ? namesQuery.eq('month', String(periodValue))
+      : namesQuery.eq('week', periodValue)
+
+    const { data, error } = await namesQuery.range(offset, offset + SUMMARY_BATCH_SIZE - 1)
+    if (error) throw error
+
+    const batch = (data || []) as Array<{ name?: string | null }>
+    names.push(...batch
+      .map(row => row.name?.trim())
+      .filter((name): name is string => Boolean(name)))
+
+    if (batch.length < SUMMARY_BATCH_SIZE) break
+    offset += SUMMARY_BATCH_SIZE
+  }
+
+  return Array.from(new Set(names))
 }
 
 const parsePositiveInteger = (value: string | null, fallback: number) => {
@@ -150,25 +196,20 @@ type AgentRosterIdentity = {
   teamLeader: string | null
 }
 
-const getAgentRosterIdentity = async (email: string): Promise<AgentRosterIdentity | null> => {
-  const { data, error } = await supabaseAdmin
-    .from('agents')
-    .select('name, team_leader')
-    .ilike('email', email.trim())
-    .limit(1)
+type AgentRosterRow = StatsRosterEntry & { email: string | null }
 
-  if (error) {
-    console.error('Canonical agent lookup error:', error)
-    return null
-  }
-
-  const rosterAgent = data?.[0]
+const getAgentRosterIdentity = (
+  email: string,
+  roster: AgentRosterRow[]
+): AgentRosterIdentity | null => {
+  const normalizedEmail = email.trim().toLowerCase()
+  const rosterAgent = roster.find(agent => agent.email?.trim().toLowerCase() === normalizedEmail)
   const name = rosterAgent?.name?.trim()
 
   return name
     ? {
         name,
-        teamLeader: rosterAgent.team_leader?.trim() || null,
+        teamLeader: rosterAgent?.team_leader?.trim() || null,
       }
     : null
 }
@@ -213,7 +254,33 @@ export async function GET(request: NextRequest) {
     const page = parsePositiveInteger(searchParams.get('page'), 1)
     const pageSize = Math.min(parsePositiveInteger(searchParams.get('pageSize'), 50), MAX_PAGE_SIZE)
     const offset = (page - 1) * pageSize
-    const agentRosterIdentity = isAgent ? await getAgentRosterIdentity(dbUser.email) : null
+    const { data: rosterData, error: rosterError } = await supabaseAdmin
+      .from('agents')
+      .select('name, email, team_leader')
+
+    if (rosterError) {
+      console.error('Agent roster fetch error:', rosterError)
+      return NextResponse.json({ error: 'Failed to fetch the agent roster' }, { status: 500 })
+    }
+
+    const roster = ((rosterData || []) as AgentRosterRow[])
+      .map(agent => ({
+        name: agent.name?.trim() || '',
+        email: agent.email,
+        team_leader: agent.team_leader?.trim() || null,
+      }))
+      .filter(agent => Boolean(agent.name))
+    const statsRoster: StatsRosterEntry[] = roster.map(agent => ({
+      name: agent.name,
+      team_leader: agent.team_leader,
+    }))
+    const supervisors = isAgent ? [] : getStatsRosterTeamLeaders(statsRoster)
+    const selectedRosterTeamLeader = !isAgent
+      && supervisorFilter
+      && supervisorFilter !== 'all'
+      ? supervisorFilter
+      : null
+    const agentRosterIdentity = isAgent ? getAgentRosterIdentity(dbUser.email, roster) : null
     const canonicalAgentName = agentRosterIdentity?.name || null
     const agentIdentityNames = isAgent
       ? getUniqueStatsIdentityNames([userName, canonicalAgentName])
@@ -231,6 +298,18 @@ export async function GET(request: NextRequest) {
     const agentTeamLeader = agentRosterIdentity?.teamLeader
       || historicalAgentIdentity?.teamLeader
       || null
+    const rosterTeamLeaderFilter = selectedRosterTeamLeader
+      || (isAgent && agentRosterIdentity?.teamLeader ? agentRosterIdentity.teamLeader : null)
+    const rosterTeamStatsNames = rosterTeamLeaderFilter
+      ? getStatsNamesForRosterTeam(
+          await fetchStatsNamesForPeriod({
+            isMonthly,
+            periodValue: selectedPeriodValue,
+          }),
+          statsRoster,
+          rosterTeamLeaderFilter
+        )
+      : null
 
     // Validate sort parameters
     const validSortFields = [
@@ -269,9 +348,10 @@ export async function GET(request: NextRequest) {
 
     if (isAgent) {
       query = query.eq('name', resolvedAgentName || '__mpg_no_agent_match__')
-    }
-    if (supervisorFilter && supervisorFilter !== 'all') {
-      query = query.eq('supervisor', supervisorFilter)
+    } else if (selectedRosterTeamLeader) {
+      query = rosterTeamStatsNames && rosterTeamStatsNames.length > 0
+        ? query.in('name', rosterTeamStatsNames)
+        : query.eq('name', NO_STATS_NAME_MATCH)
     }
     if (searchQuery) {
       query = query.ilike('name', `%${searchTerm}%`)
@@ -288,9 +368,10 @@ export async function GET(request: NextRequest) {
 
       if (isAgent) {
         rangeQuery = rangeQuery.eq('name', resolvedAgentName || '__mpg_no_agent_match__')
-      }
-      if (supervisorFilter && supervisorFilter !== 'all') {
-        rangeQuery = rangeQuery.eq('supervisor', supervisorFilter)
+      } else if (selectedRosterTeamLeader) {
+        rangeQuery = rosterTeamStatsNames && rosterTeamStatsNames.length > 0
+          ? rangeQuery.in('name', rosterTeamStatsNames)
+          : rangeQuery.eq('name', NO_STATS_NAME_MATCH)
       }
       if (searchQuery) {
         rangeQuery = rangeQuery.ilike('name', `%${searchTerm}%`)
@@ -306,17 +387,6 @@ export async function GET(request: NextRequest) {
       .order(safeSortBy, { ascending: safeOrder })
       .order('created_at', { ascending: false })
       .range(offset, offset + pageSize - 1)
-
-    let supervisorQuery = supabaseAdmin
-      .from(isMonthly ? 'stats_month' : 'stats')
-      .select('supervisor')
-    supervisorQuery = isMonthly
-      ? supervisorQuery.eq('month', String(selectedPeriodValue))
-      : supervisorQuery.eq('week', selectedWeek)
-
-    const supervisorsPromise = isAgent
-      ? Promise.resolve({ data: [], error: null })
-      : supervisorQuery
 
     const periodIdentityNames = isAgent
       ? getUniqueStatsIdentityNames([resolvedAgentName, ...agentIdentityNames])
@@ -335,10 +405,9 @@ export async function GET(request: NextRequest) {
           }),
         ])
 
-    const [statsResult, periodResults, supervisorsResult] = await Promise.all([
+    const [statsResult, periodResults] = await Promise.all([
       query,
       periodsPromise,
-      supervisorsPromise,
     ])
     const { data: rawStats, error: statsError, count: statsCount } = statsResult
 
@@ -386,7 +455,8 @@ export async function GET(request: NextRequest) {
         isMonthly,
         periodValue: selectedPeriodValue,
         selectedRange,
-        supervisor: agentTeamLeader,
+        supervisor: rosterTeamStatsNames ? null : agentTeamLeader,
+        agentNames: rosterTeamStatsNames,
       })
       agentTeamSummary = averageStatsSummary(teamSummaryRows)
       agentTeamSummaryRowCount = teamSummaryRows.length
@@ -404,25 +474,13 @@ export async function GET(request: NextRequest) {
           isMonthly,
           periodValue: selectedPeriodValue,
           selectedRange,
-          supervisor: supervisorFilter,
+          supervisor: null,
+          agentNames: selectedRosterTeamLeader ? rosterTeamStatsNames : null,
         })
         summary = averageStatsSummary(summaryRows)
         summaryMode = summary ? 'average' : 'none'
         summaryRowCount = summaryRows.length
       }
-    }
-
-    // If team leader/supervisor, also return list of unique supervisors for filtering
-    let supervisors: string[] = []
-    if (!isAgent) {
-      const uniqueSupervisors = Array.from(
-        new Set(
-          ((supervisorsResult.data || []) as Array<{ supervisor?: string | null }>)
-            .map((stat) => stat.supervisor)
-            .filter((supervisor): supervisor is string => Boolean(supervisor))
-        )
-      )
-      supervisors = uniqueSupervisors
     }
 
     return NextResponse.json({

@@ -3,8 +3,30 @@
 import Link from 'next/link'
 import { ArrowRight, BarChart3, Shield, Zap } from 'lucide-react'
 import Image from 'next/image'
+import { useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { useAuthStore } from '@/lib/authStore'
+import { getPostLoginRoute } from '@/lib/routes'
 
 export default function Home() {
+  const router = useRouter()
+  const user = useAuthStore(state => state.user)
+  const initialized = useAuthStore(state => state.initialized)
+
+  useEffect(() => {
+    if (initialized && user) {
+      router.replace(getPostLoginRoute(user.role))
+    }
+  }, [initialized, router, user])
+
+  if (!initialized || user) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="h-12 w-12 animate-spin rounded-full border-4 border-outline-variant/30 border-t-primary-container" />
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen relative overflow-hidden">
       {/* Mesh Gradient Background - Very light colors */}

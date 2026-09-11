@@ -9,7 +9,12 @@ import {
   resolveHistoricalAgentNames,
   resolveStatsNameFromCandidates,
 } from '../lib/statsIdentity.ts'
-import { resolveStatsRosterEntry, resolveStatsTeamLeader } from '../lib/statsRoster.ts'
+import {
+  getStatsNamesForRosterTeam,
+  getStatsRosterTeamLeaders,
+  resolveStatsRosterEntry,
+  resolveStatsTeamLeader,
+} from '../lib/statsRoster.ts'
 
 test('Agent scorecards bypass the stats response cache', () => {
   assert.equal(shouldCacheRoleScopedData('Agent'), false)
@@ -116,6 +121,25 @@ test('stats roster matching rejects ambiguous names and missing team leaders', (
       status: 'missing_team_leader',
       rosterName: 'Maria Cruz',
     }
+  )
+})
+
+test('team leader options and Stats membership come from the current roster', () => {
+  const roster = [
+    { name: 'Rodriguez, Aldrei', team_leader: 'Leader Two' },
+    { name: 'Jesse Rey Cabuguasan', team_leader: 'Leader One' },
+    { name: 'Another Agent', team_leader: ' leader one ' },
+    { name: 'Unassigned Agent', team_leader: null },
+  ]
+
+  assert.deepEqual(getStatsRosterTeamLeaders(roster), ['Leader One', 'Leader Two'])
+  assert.deepEqual(
+    getStatsNamesForRosterTeam(
+      ['Aldrei V. Rodriguez', 'Jesse Rey Cabuguason', 'Another Agent', 'Former Agent'],
+      roster,
+      'Leader One'
+    ),
+    ['Jesse Rey Cabuguason', 'Another Agent']
   )
 })
 

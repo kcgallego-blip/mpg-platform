@@ -1,241 +1,108 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { CalendarDays, Check, Clipboard, RefreshCw, Users } from 'lucide-react'
-import { AttendanceRecord, formatAttendanceTime } from '@/lib/attendance'
+import { ResolvedAttendanceDay, formatAttendanceTime } from '@/lib/attendance'
 import AttendanceState from './AttendanceState'
 
-type TeamAttendanceListViewProps = {
-  currentShiftDate: string
-}
+type Props = { currentShiftDate: string }
+type Tracker = { text: string; rowCount: number; lines: Array<{ agentName: string; field: string; value: string }> }
 
-const copyPlainText = async (value: string) => {
-  if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
-    const plainText = new Blob([value], { type: 'text/plain' })
-    await navigator.clipboard.write([new ClipboardItem({ 'text/plain': plainText })])
-    return
-  }
+const copyText = async (value: string) => navigator.clipboard.writeText(value)
 
-  await navigator.clipboard.writeText(value)
-}
-
-export default function TeamAttendanceListView({
-  currentShiftDate,
-}: TeamAttendanceListViewProps) {
+export default function TeamAttendanceListView({ currentShiftDate }: Props) {
   const [shiftDate, setShiftDate] = useState(currentShiftDate)
-  const [records, setRecords] = useState<AttendanceRecord[]>([])
+  const [days, setDays] = useState<ResolvedAttendanceDay[]>([])
+  const [tracker, setTracker] = useState<Tracker | null>(null)
+  const [orderIssues, setOrderIssues] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [copiedValue, setCopiedValue] = useState<string | null>(null)
-  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const requestId = useRef(0)
+  const [copied, setCopied] = useState(false)
+  const [networkStatuses, setNetworkStatuses] = useState<Record<string, string>>({})
+  const [reviewing, setReviewing] = useState('')
 
-  const loadAttendance = useCallback(async () => {
-    const currentRequestId = ++requestId.current
+  const load = useCallback(async () => {
     setLoading(true)
     setError(null)
-
     try {
-      const params = new URLSearchParams({ shiftDate })
-      const response = await fetch(`/api/attendance?${params.toString()}`, {
-        cache: 'no-store',
-      })
+      const response = await fetch(`/api/attendance?${new URLSearchParams({ shiftDate })}`, { cache: 'no-store' })
       const payload = await response.json()
-
-      if (!response.ok) {
-        throw new Error(payload.error || 'Unable to load team attendance')
-      }
-
-      if (currentRequestId === requestId.current) {
-        setRecords(payload.records || [])
-      }
+      if (!response.ok) throw new Error(payload.error || 'Unable to load attendance')
+      setDays(payload.days || [])
+      setTracker(payload.tracker || null)
+      setOrderIssues(payload.order?.issues || [])
+      setNetworkStatuses(Object.fromEntries((payload.clockNetworkStatuses || []).map((entry: any) => [`${entry.agentEmail}|${entry.shiftDate}`, entry.networkStatus])))
     } catch (requestError) {
-      if (currentRequestId === requestId.current) {
-        setError(requestError instanceof Error ? requestError.message : 'Unable to load team attendance')
-      }
+      setError(requestError instanceof Error ? requestError.message : 'Unable to load attendance')
     } finally {
-      if (currentRequestId === requestId.current) {
-        setLoading(false)
-      }
+      setLoading(false)
     }
   }, [shiftDate])
 
-  useEffect(() => {
-    void loadAttendance()
-  }, [loadAttendance])
+  useEffect(() => { void load() }, [load])
 
-  useEffect(
-    () => () => {
-      if (toastTimer.current) clearTimeout(toastTimer.current)
-    },
-    []
-  )
-
-  const handleCopy = async (timestamp: string | null) => {
-    const value = formatAttendanceTime(timestamp)
-    if (value === '--') return
-
+  const copyTracker = async () => {
+    if (!tracker) return
     try {
-      await copyPlainText(value)
-      setCopiedValue(value)
-      if (toastTimer.current) clearTimeout(toastTimer.current)
-      toastTimer.current = setTimeout(() => setCopiedValue(null), 1800)
+      await copyText(tracker.text)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1800)
     } catch {
       setError('Clipboard access was denied by the browser.')
     }
   }
 
+  const reviewOvertime = async (day: ResolvedAttendanceDay, field: 'pre_shift' | 'post_shift', decision: 'approve' | 'reject') => {
+    const key = `${day.agent}|${field}`; setReviewing(key); setError(null)
+    try { const response = await fetch('/api/attendance/overtime-review', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agentEmail: day.agent, shiftDate: day.shiftDate, field, decision, expectedUpdatedAt: day.updatedAt }) }); const payload = await response.json(); if (!response.ok) throw new Error(payload.error || 'Unable to review overtime'); await load() }
+    catch (reviewError) { setError(reviewError instanceof Error ? reviewError.message : 'Unable to review overtime') }
+    finally { setReviewing('') }
+  }
+
   return (
-    <section aria-labelledby="team-attendance-heading">
+    <section aria-labelledby="daily-attendance-heading">
       <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <div className="mb-1 flex items-center gap-2 text-sm font-medium text-primary">
-            <Users size={16} />
-            Team attendance
-          </div>
-          <h1
-            id="team-attendance-heading"
-            className="font-hanken text-3xl font-bold text-on-surface"
-          >
-            Shift log
-          </h1>
-          <p className="mt-1 text-sm text-on-surface-variant">
-            Review team clock-ins and clock-outs for a UTC-8 shift date.
-          </p>
+          <div className="mb-1 flex items-center gap-2 text-sm font-medium text-primary"><Users size={16} /> Daily attendance</div>
+          <h2 id="daily-attendance-heading" className="font-hanken text-2xl font-bold text-on-surface">Shift log</h2>
+          <p className="mt-1 text-sm text-on-surface-variant">Normal/Graveyard uses the selected Eastern shift date; Overnight uses the following calendar date.</p>
         </div>
-
         <div className="flex flex-wrap items-end gap-2">
-          <label className="block">
-            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-on-surface-variant">
-              Shift date
-            </span>
-            <span className="flex items-center gap-2 rounded-lg border border-outline-variant/50 bg-surface px-3 py-2">
-              <CalendarDays size={17} className="text-primary" />
-              <input
-                type="date"
-                value={shiftDate}
-                onChange={(event) => setShiftDate(event.target.value)}
-                className="bg-transparent text-sm font-medium text-on-surface outline-none"
-              />
-            </span>
+          <label><span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-on-surface-variant">Shift date</span>
+            <span className="flex items-center gap-2 rounded-lg border border-outline-variant/50 bg-surface px-3 py-2"><CalendarDays size={17} className="text-primary" /><input type="date" value={shiftDate} onChange={(event) => setShiftDate(event.target.value)} className="bg-transparent text-sm font-medium text-on-surface outline-none" /></span>
           </label>
-          <button
-            type="button"
-            onClick={() => void loadAttendance()}
-            disabled={loading}
-            className="inline-flex h-[42px] items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-on-primary transition-opacity hover:opacity-90 disabled:opacity-50"
-          >
-            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-            Refresh
-          </button>
+          <button type="button" onClick={() => void load()} disabled={loading} className="inline-flex h-[42px] items-center gap-2 rounded-lg border border-outline-variant/50 px-4 text-sm font-medium text-on-surface disabled:opacity-50"><RefreshCw size={16} className={loading ? 'animate-spin' : ''} />Refresh</button>
+          <button type="button" onClick={() => void copyTracker()} disabled={!tracker} className="inline-flex h-[42px] items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-on-primary disabled:opacity-40"><Clipboard size={16} />{copied ? 'Copied' : 'Copy tracker column'}</button>
         </div>
       </div>
 
-      {error ? (
-        <AttendanceState
-          kind="error"
-          title="Attendance could not be loaded"
-          description={error}
-          onRetry={() => void loadAttendance()}
-        />
-      ) : loading ? (
-        <AttendanceState
-          kind="loading"
-          title="Loading shift attendance"
-          description={`Fetching team records for ${shiftDate}.`}
-        />
-      ) : records.length === 0 ? (
-        <AttendanceState
-          kind="empty"
-          title="No attendance records"
-          description={`No team logs were found for ${shiftDate}.`}
-        />
-      ) : (
-        <div className="overflow-hidden rounded-xl border border-outline-variant/30 bg-surface/85 shadow-sm">
-          <div className="flex items-center justify-between border-b border-outline-variant/30 bg-surface-container-low/70 px-4 py-2">
-            <span className="text-xs font-semibold uppercase tracking-wide text-on-surface-variant">
-              {records.length} agent{records.length === 1 ? '' : 's'}
-            </span>
-            <span className="flex items-center gap-1 text-xs text-on-surface-variant">
-              <Clipboard size={13} />
-              Select a time to copy
-            </span>
-          </div>
-          <div className="max-h-[calc(100vh-310px)] overflow-auto">
-            <table className="w-full min-w-[640px] table-fixed">
-              <thead className="sticky top-0 z-10 bg-surface-container-low shadow-sm">
-                <tr>
-                  <th className="w-3/5 px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-on-surface-variant">
-                    Agent / ID
-                  </th>
-                  <th className="w-1/5 px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-on-surface-variant">
-                    Time in
-                  </th>
-                  <th className="w-1/5 px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-on-surface-variant">
-                    Time out
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-outline-variant/20">
-                {records.map((record) => (
-                  <tr
-                    key={`${record.agent}-${record.shift_date}`}
-                    className="transition-colors hover:bg-info-container/60"
-                  >
-                    <td className="truncate px-4 py-2 text-sm font-medium text-on-surface" title={record.agent}>
-                      {record.agent}
-                    </td>
-                    <TimeCell value={record.time_in} label={`Copy time in for ${record.agent}`} onCopy={handleCopy} />
-                    <TimeCell value={record.time_out} label={`Copy time out for ${record.agent}`} onCopy={handleCopy} />
+      {error ? <AttendanceState kind="error" title="Attendance could not be loaded" description={error} onRetry={() => void load()} /> : loading ? <AttendanceState kind="loading" title="Loading shift attendance" description={`Fetching records for ${shiftDate}.`} /> : (
+        <>
+          {orderIssues.length > 0 && <div className="mb-4 rounded-xl border border-warning/30 bg-warning-container/50 p-4 text-sm text-on-warning-container"><p className="font-semibold">Tracker output is blocked</p><ul className="mt-1 list-disc pl-5">{orderIssues.map((issue) => <li key={issue}>{issue}</li>)}</ul></div>}
+          <div className="overflow-hidden rounded-xl border border-outline-variant/30 bg-surface/85 shadow-sm">
+            <div className="border-b border-outline-variant/30 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-on-surface-variant">{days.length} agents · {tracker?.rowCount || 0} tracker rows</div>
+            <div className="max-h-[calc(100vh-350px)] overflow-auto">
+              <table className="w-full min-w-[920px]">
+                <thead className="sticky top-0 z-10 bg-surface-container-low"><tr>{['Agent','Group','Calendar date','Schedule','Status','Time in','Time out','Clock review'].map((heading) => <th key={heading} className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-on-surface-variant">{heading}</th>)}</tr></thead>
+                <tbody className="divide-y divide-outline-variant/20">{days.map((day) => (
+                  <tr key={day.agent} className="hover:bg-info-container/50">
+                    <td className="px-3 py-2"><div className="text-sm font-semibold text-on-surface">{day.agentName}</div><div className="text-xs text-on-surface-variant">{day.agent}</div></td>
+                    <td className="px-3 py-2 text-xs text-on-surface-variant">{day.shiftGroup === 'overnight' ? 'Overnight' : 'Normal / Graveyard'}</td>
+                    <td className="px-3 py-2 text-xs font-semibold text-on-surface">{day.shiftDate}{day.shiftGroup === 'overnight' && <span className="ml-1 text-primary">(+1)</span>}</td>
+                    <td className="px-3 py-2 text-xs text-on-surface-variant">{day.startShift || '—'} – {day.endShift || '—'}</td>
+                    <td className="px-3 py-2"><span className="rounded-full bg-surface-container-high px-2 py-1 text-xs font-semibold text-on-surface">{day.status}</span></td>
+                    <td className="px-3 py-2 font-mono text-xs font-semibold text-on-surface">{formatAttendanceTime(day.timeIn)}</td>
+                    <td className="px-3 py-2 font-mono text-xs font-semibold text-on-surface">{formatAttendanceTime(day.timeOut)}</td>
+                    <td className="px-3 py-2 text-xs"><div className="space-y-1">{networkStatuses[`${day.agent}|${day.shiftDate}`] && <span className={`block rounded px-2 py-1 font-semibold ${networkStatuses[`${day.agent}|${day.shiftDate}`].includes('flagged') ? 'bg-warning-container text-on-warning-container' : 'bg-surface-container-high text-on-surface-variant'}`}>{networkStatuses[`${day.agent}|${day.shiftDate}`].replace(/_/g, ' ')}</span>}{day.preShiftOtReview === 'pending' && <div className="rounded border border-success/30 p-2"><p className="font-semibold">Pre-shift OT · {day.preShiftOtMinutes} min</p><div className="mt-1 flex gap-1"><button disabled={Boolean(reviewing)} onClick={() => void reviewOvertime(day, 'pre_shift', 'approve')} className="rounded bg-success-container px-2 py-1 font-semibold text-on-success-container">Approve</button><button disabled={Boolean(reviewing)} onClick={() => void reviewOvertime(day, 'pre_shift', 'reject')} className="rounded bg-surface-container-high px-2 py-1">Reject</button></div></div>}{day.postShiftOtReview === 'pending' && <div className="rounded border border-success/30 p-2"><p className="font-semibold">Post-shift OT · {day.postShiftOtMinutes} min</p><div className="mt-1 flex gap-1"><button disabled={Boolean(reviewing)} onClick={() => void reviewOvertime(day, 'post_shift', 'approve')} className="rounded bg-success-container px-2 py-1 font-semibold text-on-success-container">Approve</button><button disabled={Boolean(reviewing)} onClick={() => void reviewOvertime(day, 'post_shift', 'reject')} className="rounded bg-surface-container-high px-2 py-1">Reject</button></div></div>}</div></td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                ))}</tbody>
+              </table>
+            </div>
           </div>
-        </div>
+          {tracker && <details className="mt-4 rounded-xl border border-outline-variant/30 bg-surface p-4"><summary className="cursor-pointer text-sm font-semibold text-on-surface">Preview tracker row pairing</summary><div className="mt-3 max-h-64 overflow-auto font-mono text-xs">{tracker.lines.map((line, index) => <div key={`${line.agentName}-${line.field}`} className="grid grid-cols-[3rem_1fr_5rem_8rem] gap-2 border-b border-outline-variant/20 py-1"><span>{index + 1}</span><span>{line.agentName}</span><span>{line.field}</span><span>{line.value || '(blank)'}</span></div>)}</div></details>}
+        </>
       )}
-
-      {copiedValue && (
-        <div
-          className="fixed bottom-6 right-6 z-[70] flex items-center gap-2 rounded-lg bg-on-surface px-4 py-3 text-sm font-medium text-background shadow-xl"
-          role="status"
-          aria-live="polite"
-        >
-          <Check size={17} className="text-green-300" />
-          Copied {copiedValue}
-        </div>
-      )}
+      {copied && <div className="fixed bottom-6 right-6 z-[70] flex items-center gap-2 rounded-lg bg-on-surface px-4 py-3 text-sm font-medium text-background shadow-xl"><Check size={17} />Copied {tracker?.rowCount} rows</div>}
     </section>
-  )
-}
-
-function TimeCell({
-  value,
-  label,
-  onCopy,
-}: {
-  value: string | null
-  label: string
-  onCopy: (value: string | null) => void
-}) {
-  const formatted = formatAttendanceTime(value)
-  const canCopy = formatted !== '--'
-
-  return (
-    <td className="px-3 py-1.5">
-      <button
-        type="button"
-        onClick={() => void onCopy(value)}
-        disabled={!canCopy}
-        aria-label={canCopy ? label : `${label}: no value`}
-        className={`rounded-md px-2 py-1 font-mono text-xs font-semibold transition-colors ${
-          canCopy
-            ? 'cursor-copy text-primary hover:bg-primary/10 focus:outline-none focus:ring-2 focus:ring-primary/30'
-            : 'cursor-default text-on-surface-variant/60'
-        }`}
-      >
-        {formatted}
-      </button>
-    </td>
   )
 }

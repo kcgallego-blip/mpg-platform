@@ -272,6 +272,20 @@ export function isNAField(fieldName: string): boolean {
   return criteria?.type === 'na'
 }
 
+export function formatStatPercentage(
+  value: string | number | null | undefined,
+  decimalPlaces: number
+): string | null {
+  let percentage = typeof value === 'string' ? parsePercentage(value) : value
+  if (typeof percentage === 'number' && percentage > 0 && percentage < 1) {
+    percentage *= 100
+  }
+
+  return typeof percentage === 'number' && Number.isFinite(percentage)
+    ? `${percentage.toFixed(decimalPlaces)}%`
+    : null
+}
+
 /**
  * Formats display value for a stat field
  */

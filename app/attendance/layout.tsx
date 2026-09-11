@@ -8,6 +8,7 @@ import { useFeatureSettingsStore } from '@/lib/featureSettingsStore'
 import { useRequireAuth } from '@/lib/useRequireAuth'
 import { useEffect } from 'react'
 import { getPostLoginRoute } from '@/lib/routes'
+import { ATTENDANCE_ALWAYS_VISIBLE_LOCALLY } from '@/lib/featureAccess'
 
 export default function AttendanceLayout({ children }: { children: ReactNode }) {
   const { user, isReady } = useRequireAuth()
@@ -26,7 +27,10 @@ export default function AttendanceLayout({ children }: { children: ReactNode }) 
     }
   }, [isAdmin, isReady, loadFeatureSettings, user?.email])
 
-  if (!isReady || (!isAdmin && !settingsReady && !settingsError)) {
+  if (
+    !isReady ||
+    (!ATTENDANCE_ALWAYS_VISIBLE_LOCALLY && !isAdmin && !settingsReady && !settingsError)
+  ) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="text-center" role="status">
@@ -37,7 +41,11 @@ export default function AttendanceLayout({ children }: { children: ReactNode }) 
     )
   }
 
-  if (!isAdmin && (!settingsReady || !canAccessAttendance)) {
+  if (
+    !ATTENDANCE_ALWAYS_VISIBLE_LOCALLY &&
+    !isAdmin &&
+    (!settingsReady || !canAccessAttendance)
+  ) {
     return (
       <div className="min-h-screen">
         <Navigation />
