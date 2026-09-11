@@ -21,7 +21,16 @@ test('keeps a graveyard action on the previous attendance date after midnight', 
 
 test('uses the actual Eastern calendar date for an overnight shift', () => {
   const today = attendanceDay({ shiftDate: '2026-09-09', shiftGroup: 'overnight', startShift: '01:00:00', endShift: '10:00:00' })
-  assert.equal(chooseCurrentClockDay([today], '2026-09-09 01:15:00').day?.shiftDate, '2026-09-09')
+  assert.equal(chooseCurrentClockDay([today], '2026-09-09 01:15:00', '2026-09-09').day?.shiftDate, '2026-09-09')
+})
+
+test('uses the highlighted +1 operational date for overnight before midnight', () => {
+  const literalToday = attendanceDay({ shiftDate: '2026-09-09', shiftGroup: 'overnight', startShift: '01:00:00', endShift: '10:00:00' })
+  const highlightedDay = attendanceDay({ shiftDate: '2026-09-10', shiftGroup: 'overnight', startShift: '01:00:00', endShift: '10:00:00' })
+  assert.equal(
+    chooseCurrentClockDay([literalToday, highlightedDay], '2026-09-09 23:00:00', '2026-09-10').day?.shiftDate,
+    '2026-09-10',
+  )
 })
 
 test('keeps an unfinished clock until 24 hours when today is a rest day', () => {

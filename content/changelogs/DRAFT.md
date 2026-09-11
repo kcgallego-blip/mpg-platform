@@ -12,7 +12,7 @@ Use this file while implementing the next release. Keep the wording user-facing 
 
 ## Fixed
 
-<!-- Add resolved user-visible problems here. -->
+* Fixed some agent cannot see the current week in the survey page.
 
 ## Release checklist
 

@@ -47,22 +47,31 @@ const clockMinutes = (value: string) => {
 const timestampValue = (value: string | null) => value ? Date.parse(`${value.replace(' ', 'T')}Z`) : Number.NaN
 const protectedStatus = (status: string) => ['Holiday Off', 'Vacation Leave', 'Sick Leave', 'Leave', 'Transition Off'].includes(status)
 
-export const chooseCurrentClockDay = (days: ResolvedAttendanceDay[], easternTimestamp: string) => {
+export const chooseCurrentClockDay = (days: ResolvedAttendanceDay[], easternTimestamp: string, operationalDate?: string) => {
   const today = easternTimestamp.slice(0, 10)
   const yesterday = addDateKeyDays(today, -1)
   const now = timestampValue(easternTimestamp)
   const todayDay = days.find((day) => day.shiftDate === today)
   const yesterdayDay = days.find((day) => day.shiftDate === yesterday)
+  const operationalDay = operationalDate ? days.find((day) => day.shiftDate === operationalDate) : null
   const open = [...days].filter((day) => day.timeIn && !day.timeOut).sort((a, b) => b.shiftDate.localeCompare(a.shiftDate))[0]
 
   if (open) {
     const openedAt = timestampValue(open.timeIn)
     const notExpired = Number.isFinite(openedAt) && now < openedAt + 24 * 60 * 60_000
-    const todayHasScheduledShift = Boolean(todayDay && todayDay.status !== 'Day Off' && !todayDay.status.startsWith('RDOT') && !protectedStatus(todayDay.status))
-    const nextStartMinutes = todayHasScheduledShift && todayDay ? clockMinutes(todayDay.startShift) : null
-    const nextStart = nextStartMinutes === null ? Number.POSITIVE_INFINITY : Date.parse(`${today}T00:00:00Z`) + nextStartMinutes * 60_000
-    if (notExpired && (open.shiftDate === today || now < nextStart)) return { day: open, staleOpen: false }
+    const nextDay = operationalDay || todayDay
+    const nextDate = nextDay?.shiftDate || today
+    const nextDayHasScheduledShift = Boolean(nextDay && nextDay.status !== 'Day Off' && !nextDay.status.startsWith('RDOT') && !protectedStatus(nextDay.status))
+    const nextStartMinutes = nextDayHasScheduledShift && nextDay ? clockMinutes(nextDay.startShift) : null
+    const nextStart = nextStartMinutes === null ? Number.POSITIVE_INFINITY : Date.parse(`${nextDate}T00:00:00Z`) + nextStartMinutes * 60_000
+    if (notExpired && (open.shiftDate === nextDate || now < nextStart)) return { day: open, staleOpen: false }
     return { day: open, staleOpen: true }
+  }
+
+  // Overnight belongs to the following operational calendar date, including
+  // the pre-midnight period when that +1 date is already highlighted in the calendar.
+  if (operationalDay?.shiftGroup === 'overnight') {
+    return { day: operationalDay, staleOpen: false }
   }
 
   if (yesterdayDay?.shiftGroup === 'normal_graveyard') {

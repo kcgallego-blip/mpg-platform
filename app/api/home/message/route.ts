@@ -1,14 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthenticatedDbUser } from '@/lib/sessionAuth'
-import {
-  getOrGenerateHomeMessage,
-  HomeMessageConflictError,
-} from '@/lib/homeMessageService'
-import { HomeMessageGenerationError } from '@/lib/homeMessageGenerator'
+import { getOrGenerateHomeMessage } from '@/lib/homeMessageService'
+import { getDailyFallbackHomeMessage, getManilaDateKey } from '@/lib/homeInsights'
 
 const noStoreHeaders = { 'Cache-Control': 'no-store' }
 
 export async function POST(request: NextRequest) {
+  let authenticatedName: string | null = null
   try {
     const user = await getAuthenticatedDbUser(request)
     if (!user) {
@@ -24,41 +22,25 @@ export async function POST(request: NextRequest) {
         { status: 403, headers: noStoreHeaders }
       )
     }
+    authenticatedName = user.name
 
-    const body = await request.json().catch(() => ({})) as { regenerate?: unknown }
-    if (body.regenerate !== undefined && typeof body.regenerate !== 'boolean') {
-      return NextResponse.json(
-        { error: 'regenerate must be a boolean' },
-        { status: 400, headers: noStoreHeaders }
-      )
-    }
-
-    const result = await getOrGenerateHomeMessage(user, body.regenerate === true)
+    const result = await getOrGenerateHomeMessage(user)
     return NextResponse.json(result, { headers: noStoreHeaders })
   } catch (error) {
-    if (error instanceof HomeMessageConflictError) {
-      return NextResponse.json(
-        {
-          error: error.message,
-          ...error.current,
-        },
-        { status: 409, headers: noStoreHeaders }
-      )
-    }
-
-    if (error instanceof HomeMessageGenerationError) {
-      console.error(`Home message generation error (${error.reason}):`, error.message)
-      return NextResponse.json(
-        { error: 'Your AI message is temporarily unavailable' },
-        { status: 503, headers: noStoreHeaders }
-      )
-    }
-
     console.error('Home message API error:', error)
+    if (authenticatedName === null) {
+      return NextResponse.json(
+        { error: 'Failed to load your home message' },
+        { status: 500, headers: noStoreHeaders }
+      )
+    }
     return NextResponse.json(
-      { error: 'Failed to load your home message' },
-      { status: 500, headers: noStoreHeaders }
+      {
+        message: getDailyFallbackHomeMessage(authenticatedName, getManilaDateKey()),
+        generatedAt: new Date().toISOString(),
+        canRegenerate: false,
+      },
+      { headers: noStoreHeaders }
     )
   }
 }
-

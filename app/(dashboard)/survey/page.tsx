@@ -603,7 +603,7 @@ export default function SurveyPage() {
                   )}
                 </select>
                 <p className="mt-2 text-sm text-on-surface-variant">
-                  Showing {selectedPeriodLabel}. Options are based on uploaded survey dates only.
+                  Showing {selectedPeriodLabel}. The current week is always available; other options are based on uploaded survey dates.
                 </p>
               </div>
             </div>

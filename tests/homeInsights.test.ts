@@ -3,11 +3,23 @@ import test from 'node:test'
 import {
   buildHomeInsightCandidates,
   collapseWeeklyStats,
+  getDailyFallbackHomeMessage,
   getAgentFirstName,
   getManilaDateKey,
   sanitizeSurveyComment,
   selectWeightedHomeInsight,
 } from '../lib/homeInsights.ts'
+
+test('daily Home fallback stays stable for one Manila date and changes the next day', () => {
+  assert.equal(
+    getDailyFallbackHomeMessage('Alex Rivera', '2026-09-12'),
+    getDailyFallbackHomeMessage('Alex Rivera', '2026-09-12')
+  )
+  assert.notEqual(
+    getDailyFallbackHomeMessage('Alex Rivera', '2026-09-12'),
+    getDailyFallbackHomeMessage('Alex Rivera', '2026-09-13')
+  )
+})
 
 test('Home insight candidates identify repeated misses, passing streaks, and improvement', () => {
   const candidates = buildHomeInsightCandidates({

@@ -1,7 +1,7 @@
 import 'server-only'
 
 import type { AttendanceNetworkStatus, OvertimeReviewStatus, RosterAttendanceAgent } from './attendance'
-import { addDateKeyDays, getDefaultShiftDate, getEasternWallClockTimestamp, normalizeEmail } from './attendance'
+import { addDateKeyDays, getDefaultShiftDate, getEasternWallClockTimestamp, getOperationalCalendarDate, normalizeEmail } from './attendance'
 import { chooseCurrentClockDay, getClockActionState, getSelfServiceOtReview, type AgentClockState, type ClockAction, type ClockSurface } from './attendanceClock'
 import { getAttendanceTiming } from './attendanceManagement'
 import { loadAttendanceRoster, loadResolvedAttendance } from './attendanceService'
@@ -69,10 +69,13 @@ export const classifyClockNetwork = async (ip: string | null, isWfh: boolean): P
 
 const buildClockState = async (agent: RosterAttendanceAgent, enabled: boolean, now: Date, networkStatus: AttendanceNetworkStatus | null): Promise<AgentClockState> => {
   const easternTimestamp = getEasternWallClockTimestamp(now)
-  const today = easternTimestamp.slice(0, 10)
-  const from = addDateKeyDays(today, -1)
-  const resolved = await loadResolvedAttendance({ from, to: today, roster: [agent], currentShiftDate: getDefaultShiftDate(now), currentTimestamp: easternTimestamp })
-  const target = chooseCurrentClockDay(resolved.days, easternTimestamp)
+  const currentShiftDate = getDefaultShiftDate(now)
+  const from = addDateKeyDays(currentShiftDate, -1)
+  const to = addDateKeyDays(currentShiftDate, 1)
+  const resolved = await loadResolvedAttendance({ from, to, roster: [agent], currentShiftDate, currentTimestamp: easternTimestamp })
+  const baseDay = resolved.days.find((day) => day.shiftDate === currentShiftDate)
+  const operationalDate = getOperationalCalendarDate(currentShiftDate, baseDay?.shiftGroup || agent.shiftGroup)
+  const target = chooseCurrentClockDay(resolved.days, easternTimestamp, operationalDate)
   const actionState = getClockActionState(target.day, target.staleOpen)
   const day = target.day
   return {
@@ -99,13 +102,39 @@ const buildClockState = async (agent: RosterAttendanceAgent, enabled: boolean, n
   }
 }
 
+const buildDisabledClockState = (now: Date): AgentClockState => ({
+  enabled: false,
+  serverTimestamp: getEasternWallClockTimestamp(now),
+  shiftDate: null,
+  status: 'Unavailable',
+  shiftGroup: null,
+  startShift: '',
+  endShift: '',
+  timeIn: null,
+  timeOut: null,
+  isRdot: false,
+  action: null,
+  actionLabel: null,
+  blockedReason: 'Self-service clocking is not enabled for your account.',
+  networkStatus: null,
+  preShiftOtReview: 'not_required',
+  postShiftOtReview: 'not_required',
+  preShiftOtMinutes: 0,
+  postShiftOtMinutes: 0,
+  lateMinutes: 0,
+  undertimeMinutes: 0,
+})
+
 export const loadAgentClockState = async (email: string, ip: string | null, now = new Date()) => {
-  const [roster, policy] = await Promise.all([loadAttendanceRoster(), getClockPolicy(email)])
+  const policy = await getClockPolicy(email)
+  if (!policy?.self_service_enabled) {
+    return { agent: null, policy, state: buildDisabledClockState(now) }
+  }
+  const roster = await loadAttendanceRoster()
   const agent = roster.find((entry) => entry.email === normalizeEmail(email))
   if (!agent) throw new Error('Your account is not linked to an active roster email.')
-  const enabled = Boolean(policy?.self_service_enabled)
-  const networkStatus = enabled ? await classifyClockNetwork(ip, Boolean(policy?.is_wfh)) : null
-  return { agent, policy, state: await buildClockState(agent, enabled, now, networkStatus) }
+  const networkStatus = await classifyClockNetwork(ip, Boolean(policy.is_wfh))
+  return { agent, policy, state: await buildClockState(agent, true, now, networkStatus) }
 }
 
 export const performAgentClock = async ({ email, action, surface, requestId, ip, userAgent, now = new Date() }: {
@@ -113,6 +142,7 @@ export const performAgentClock = async ({ email, action, surface, requestId, ip,
 }) => {
   const context = await loadAgentClockState(email, ip, now)
   if (!context.state.enabled) throw Object.assign(new Error('Self-service clocking is not enabled for your account.'), { status: 403 })
+  if (!context.agent) throw Object.assign(new Error('Your account is not linked to an active roster email.'), { status: 409 })
   if (!context.state.shiftDate || context.state.action !== action) throw Object.assign(new Error(context.state.blockedReason || 'Attendance changed. Refresh before clocking.'), { code: '40001' })
   const easternTimestamp = getEasternWallClockTimestamp(now)
   const timing = getAttendanceTiming({

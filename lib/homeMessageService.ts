@@ -5,6 +5,7 @@ import { supabaseAdmin } from './supabaseAdmin'
 import {
   buildHomeInsightCandidates,
   collapseWeeklyStats,
+  getDailyFallbackHomeMessage,
   getAgentFirstName,
   getManilaDateKey,
   type HomeInsightCategory,
@@ -12,7 +13,7 @@ import {
   type HomeSurveyFeedback,
   selectWeightedHomeInsight,
 } from './homeInsights'
-import { generateHomeMessage } from './homeMessageGenerator'
+import { generateHomeMessage, HomeMessageGenerationError } from './homeMessageGenerator'
 import {
   getStatsNameSearchFragments,
   getUniqueStatsIdentityNames,
@@ -218,7 +219,8 @@ async function getAgentInsightData(user: AuthenticatedDbUser) {
 
 async function createGeneratedMessage(
   user: AuthenticatedDbUser,
-  previousCategory: HomeInsightCategory | null
+  previousCategory: HomeInsightCategory | null,
+  messageDate: string
 ) {
   const insightData = await getAgentInsightData(user)
   const candidates = buildHomeInsightCandidates(insightData)
@@ -228,10 +230,17 @@ async function createGeneratedMessage(
     throw new Error('No home message insight could be selected')
   }
 
-  const message = await generateHomeMessage({
-    firstName: getAgentFirstName(user.name),
-    insight,
-  })
+  let message: string
+  try {
+    message = await generateHomeMessage({
+      firstName: getAgentFirstName(user.name),
+      insight,
+    })
+  } catch (error) {
+    if (!(error instanceof HomeMessageGenerationError)) throw error
+    console.error(`Home message generation fallback (${error.reason}):`, error.message)
+    message = getDailyFallbackHomeMessage(user.name, messageDate)
+  }
 
   return { message, category: insight.category }
 }
@@ -251,7 +260,7 @@ export async function getOrGenerateHomeMessage(
   }
 
   const previousCategory = await getPreviousCategory(agentEmail, messageDate)
-  const generated = await createGeneratedMessage(user, previousCategory)
+  const generated = await createGeneratedMessage(user, previousCategory, messageDate)
   const generatedAt = new Date().toISOString()
 
   if (current) {

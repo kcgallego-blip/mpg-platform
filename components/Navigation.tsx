@@ -68,7 +68,7 @@ const itNavItems: NavItem[] = [
 ]
 
 const agentNavItems: NavItem[] = [
-  { href: '/home', icon: House, label: 'Home' },
+  { href: '/home', icon: House, label: 'Home (BETA TEST)' },
   { href: '/agent', icon: LayoutDashboard, label: 'Agent' },
   { href: '/support', icon: BookOpen, label: 'Support' },
   { href: '/suggestions', icon: MessageSquareText, label: 'Suggestions' },

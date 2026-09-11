@@ -154,6 +154,23 @@ export function getManilaDateKey(date = new Date()) {
   return `${value('year')}-${value('month')}-${value('day')}`
 }
 
+const DAILY_HOME_FALLBACKS = [
+  (name: string) => `${name}, take today one interaction at a time. Clear, steady work adds up.`,
+  (name: string) => `${name}, bring your focus to the next customer and give that conversation your best attention.`,
+  (name: string) => `${name}, small improvements count. Stay curious, keep your pace steady, and build from each interaction.`,
+  (name: string) => `${name}, your consistency matters. Keep the next step simple and let good habits carry the day.`,
+] as const
+
+export function getDailyFallbackHomeMessage(
+  name: string | null | undefined,
+  dateKey = getManilaDateKey()
+) {
+  const firstName = getAgentFirstName(name)
+  const parsedDay = Date.parse(`${dateKey}T00:00:00Z`)
+  const dayNumber = Number.isFinite(parsedDay) ? Math.floor(parsedDay / 86_400_000) : 0
+  return DAILY_HOME_FALLBACKS[Math.abs(dayNumber) % DAILY_HOME_FALLBACKS.length](firstName)
+}
+
 export function collapseWeeklyStats<
   T extends HomeStatsSnapshot & { week: number; range: number; created_at: string }
 >(rows: T[]) {
