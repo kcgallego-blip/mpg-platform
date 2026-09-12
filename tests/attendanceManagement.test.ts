@@ -240,6 +240,26 @@ test('calculates early, late, post-shift, and undertime minutes across midnight'
   assert.equal(shortDay.undertimeMinutes, 18)
 })
 
+test('marks Late only after one complete minute has passed', () => {
+  const withinFirstMinute = getAttendanceTiming({
+    shiftDate: '2026-09-07',
+    startShift: '9:00 PM',
+    endShift: '6:00 AM',
+    timeIn: '2026-09-07 21:00:59',
+    timeOut: null,
+  })
+  assert.equal(withinFirstMinute.lateMinutes, 0)
+
+  const oneMinuteLate = getAttendanceTiming({
+    shiftDate: '2026-09-07',
+    startShift: '9:00 PM',
+    endShift: '6:00 AM',
+    timeIn: '2026-09-07 21:01:00',
+    timeOut: null,
+  })
+  assert.equal(oneMinuteLate.lateMinutes, 1)
+})
+
 test('builds two-cell agent clipboard output with late, undertime, and RDOT colors', () => {
   const lateAndUndertime = resolveAttendanceDay({
     rosterAgent: { ...roster[0], off1: '', off2: '' },
@@ -256,6 +276,7 @@ test('builds two-cell agent clipboard output with late, undertime, and RDOT colo
   assert.equal(delayed.plainText, '21:10:00\n05:45:00')
   assert.deepEqual(delayed.colors, ['#FFFF00', '#FFFF00'])
   assert.equal((delayed.html.match(/bgcolor="#FFFF00"/g) || []).length, 2)
+  assert.doesNotMatch(delayed.html, /;color:/)
 
   const rdot = resolveAttendanceDay({
     rosterAgent: roster[0],
@@ -271,6 +292,7 @@ test('builds two-cell agent clipboard output with late, undertime, and RDOT colo
   const restDay = buildAgentAttendanceClipboard(rdot)
   assert.deepEqual(restDay.colors, ['#34A853', '#34A853'])
   assert.equal((restDay.html.match(/bgcolor="#34A853"/g) || []).length, 2)
+  assert.doesNotMatch(restDay.html, /;color:/)
 })
 
 test('treats an Overnight 11:58 PM Time In as two minutes early for a midnight start', () => {

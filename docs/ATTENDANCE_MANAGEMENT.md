@@ -74,6 +74,8 @@ The server—not the browser—chooses the Agent, attendance date, and clock val
 
 Self-service clocks at least 120 minutes before start or after end create a pending OT review. Agents see that the result is pending. Team Leader and above approve or reject it in Daily Log. Late and undertime remain calculated without approval, and RDOT is not compared with the ordinary roster schedule.
 
+Late counting begins only after one complete minute has elapsed: a Time In from the scheduled second through 59 seconds afterward remains on time, while exactly 1:00 afterward is one minute late.
+
 For Overnight schedules starting from midnight through 5:59 AM, timing comparisons reconcile the adjacent calendar date at the midnight boundary. For example, an 11:58 PM Time In for a 12:00 AM start is two minutes early on the Overnight `+1` shift, not late. The original clock timestamp remains unchanged for display and audit.
 
 ## Shift-date rules
@@ -349,7 +351,7 @@ Use **Copy tracker column**, then paste into a single date column in Google Shee
 
 Daily Log shows color-coded status badges, clickable status-count filters, and sorting by Needs review first, tracker order, agent name, or status. The default review-first order brings missing/absence-review records and pending OT above routine Scheduled or Complete rows; full tracker-column copying always preserves the saved tracker order.
 
-Click an Agent name in Shift Log to copy only that Agent's two vertical spreadsheet cells: Time In followed by Time Out. The clipboard includes plain text plus rich HTML for compatible spreadsheet applications. A late Time In or undertime Time Out uses `#FFFF00` on only the affected cell; RDOT uses `#34A853` on both cells. Browsers without rich clipboard support still copy the same two plain-text values without cell colors.
+Click an Agent name in Shift Log to copy only that Agent's two vertical spreadsheet cells: Time In followed by Time Out. The Shift Log itself does not color the clock cells. Clipboard values carry no font or text formatting; for compatible spreadsheet applications, only a late Time In or undertime Time Out cell receives background `#FFFF00`, while both RDOT cells receive background `#34A853`. Browsers without rich clipboard support still copy the same two plain-text values without cell colors.
 
 ## Manual entry and September 2026 backfill
 

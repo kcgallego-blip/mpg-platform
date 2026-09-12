@@ -804,10 +804,11 @@ export const getAttendanceTiming = ({ shiftDate, startShift, endShift, timeIn, t
     ? alignClockToScheduledBoundary(parsedActualOut, scheduledEnd)
     : parsedActualOut
   const roundedMinutes = (milliseconds: number) => Math.max(0, Math.round(milliseconds / 60_000))
+  const completedMinutes = (milliseconds: number) => Math.max(0, Math.floor(milliseconds / 60_000))
   return {
     preShiftOtMinutes: Number.isFinite(actualIn) ? roundedMinutes(scheduledStart - actualIn) : 0,
     postShiftOtMinutes: Number.isFinite(actualOut) ? roundedMinutes(actualOut - scheduledEnd) : 0,
-    lateMinutes: Number.isFinite(actualIn) ? roundedMinutes(actualIn - scheduledStart) : 0,
+    lateMinutes: Number.isFinite(actualIn) ? completedMinutes(actualIn - scheduledStart) : 0,
     undertimeMinutes: Number.isFinite(actualOut) ? roundedMinutes(scheduledEnd - actualOut) : 0,
   }
 }

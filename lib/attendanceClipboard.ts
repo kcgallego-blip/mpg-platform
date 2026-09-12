@@ -18,8 +18,7 @@ export const buildAgentAttendanceClipboard = (day: ResolvedAttendanceDay) => {
     : [day.lateMinutes > 0 ? '#FFFF00' : '', day.undertimeMinutes > 0 ? '#FFFF00' : '']
   const html = `<table><tbody>${values.map((value, index) => {
     const color = colors[index]
-    const textColor = color === '#34A853' ? '#FFFFFF' : '#000000'
-    return `<tr><td${color ? ` bgcolor="${color}" style="background-color:${color};color:${textColor}"` : ''}>${escapeHtml(value)}</td></tr>`
+    return `<tr><td${color ? ` bgcolor="${color}" style="background-color:${color}"` : ''}>${escapeHtml(value)}</td></tr>`
   }).join('')}</tbody></table>`
 
   return { values, colors, plainText: values.join('\n'), html }
