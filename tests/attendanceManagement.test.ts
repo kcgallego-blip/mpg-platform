@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { canManageAttendance, isAttendanceRosterRole } from '../lib/attendanceAccess.ts'
+import { buildAgentAttendanceClipboard } from '../lib/attendanceClipboard.ts'
 import {
   buildImportPreview,
   buildAbsenceReviews,
@@ -105,6 +106,48 @@ test('unknown emails require approval before using a fuzzy roster-name fallback'
   assert.match(approved.agents[0].nameWarning || '', /approved name fallback/)
 })
 
+test('uncertain identity schedule evidence uses AM/PM and Overnight calendar dates accurately', () => {
+  const overnightAgent: RosterAttendanceAgent = {
+    ...roster[1],
+    startShift: '12:00 AM',
+    endShift: '9:00 AM',
+    off1: '',
+    off2: '',
+  }
+  const overnightDays = ['2026-09-07', '2026-09-08'].map((date) => resolveAttendanceDay({
+    rosterAgent: overnightAgent,
+    date,
+    currentShiftDate: '2026-09-07',
+  }))
+  const overnightPaste = parseGoogleFormPaste('9/7/2026 11:58 PM\twrong@example.com\tMaria Luisa De Vra\tTime IN\tCharlene')
+  const overnightPreview = buildImportPreview({
+    rows: overnightPaste.rows,
+    roster: [overnightAgent],
+    existing: [],
+    resolvedDays: overnightDays,
+    baseShiftDate: '2026-09-07',
+  })
+  assert.equal(overnightPreview.identityReviews[0].candidates[0].scheduleEvidence, '2 min early from scheduled Time In (12:00 AM)')
+
+  const eveningAgent: RosterAttendanceAgent = {
+    ...roster[0],
+    startShift: '9:00 PM',
+    endShift: '6:00 AM',
+    off1: '',
+    off2: '',
+  }
+  const eveningDay = resolveAttendanceDay({ rosterAgent: eveningAgent, date: '2026-09-07', currentShiftDate: '2026-09-07' })
+  const eveningPaste = parseGoogleFormPaste('9/7/2026 8:55 PM\twrong@example.com\tCarla Medna\tTime IN\tCharlene')
+  const eveningPreview = buildImportPreview({
+    rows: eveningPaste.rows,
+    roster: [eveningAgent],
+    existing: [],
+    resolvedDays: [eveningDay],
+    baseShiftDate: '2026-09-07',
+  })
+  assert.equal(eveningPreview.identityReviews[0].candidates[0].scheduleEvidence, '5 min early from scheduled Time In (9:00 PM)')
+})
+
 test('conflicting known email and name require uploader approval with schedule evidence', () => {
   const parsed = parseGoogleFormPaste('9/6/2026 21:05:00\tcarla@example.com\tMaria Luisa De Vera\tTime IN\tCharlene')
   const resolvedDays = roster.map((agent) => resolveAttendanceDay({
@@ -195,6 +238,63 @@ test('calculates early, late, post-shift, and undertime minutes across midnight'
   })
   assert.equal(shortDay.lateMinutes, 17)
   assert.equal(shortDay.undertimeMinutes, 18)
+})
+
+test('builds two-cell agent clipboard output with late, undertime, and RDOT colors', () => {
+  const lateAndUndertime = resolveAttendanceDay({
+    rosterAgent: { ...roster[0], off1: '', off2: '' },
+    date: '2026-09-07',
+    currentShiftDate: '2026-09-07',
+    attendance: {
+      agent: roster[0].email,
+      shift_date: '2026-09-07',
+      time_in: '2026-09-07 21:10:00',
+      time_out: '2026-09-08 05:45:00',
+    },
+  })
+  const delayed = buildAgentAttendanceClipboard(lateAndUndertime)
+  assert.equal(delayed.plainText, '21:10:00\n05:45:00')
+  assert.deepEqual(delayed.colors, ['#FFFF00', '#FFFF00'])
+  assert.equal((delayed.html.match(/bgcolor="#FFFF00"/g) || []).length, 2)
+
+  const rdot = resolveAttendanceDay({
+    rosterAgent: roster[0],
+    date: '2026-09-06',
+    currentShiftDate: '2026-09-06',
+    attendance: {
+      agent: roster[0].email,
+      shift_date: '2026-09-06',
+      time_in: '2026-09-06 21:00:00',
+      time_out: '2026-09-07 06:00:00',
+    },
+  })
+  const restDay = buildAgentAttendanceClipboard(rdot)
+  assert.deepEqual(restDay.colors, ['#34A853', '#34A853'])
+  assert.equal((restDay.html.match(/bgcolor="#34A853"/g) || []).length, 2)
+})
+
+test('treats an Overnight 11:58 PM Time In as two minutes early for a midnight start', () => {
+  const operationalDate = getAttendanceTiming({
+    shiftDate: '2026-09-08',
+    startShift: '12:00 AM',
+    endShift: '9:00 AM',
+    timeIn: '2026-09-07 23:58:00',
+    timeOut: '2026-09-08 09:00:00',
+  })
+  assert.equal(operationalDate.preShiftOtMinutes, 2)
+  assert.equal(operationalDate.lateMinutes, 0)
+
+  const baseDatePayload = getAttendanceTiming({
+    shiftDate: '2026-09-07',
+    startShift: '12:00 AM',
+    endShift: '9:00 AM',
+    timeIn: '2026-09-07 23:58:00',
+    timeOut: '2026-09-08 09:00:00',
+  })
+  assert.equal(baseDatePayload.preShiftOtMinutes, 2)
+  assert.equal(baseDatePayload.lateMinutes, 0)
+  assert.equal(baseDatePayload.postShiftOtMinutes, 0)
+  assert.equal(baseDatePayload.undertimeMinutes, 0)
 })
 
 test('requires uploader approval at the two-hour pre/post-shift OT threshold', () => {

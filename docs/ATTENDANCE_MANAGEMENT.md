@@ -70,9 +70,11 @@ Pilot-enabled Agents can open Attendance and self-clock even when the global Att
 
 Team Leader and above use **Attendance → Clocking Policy** to mark active Agents as Office or WFH. WFH Agents may clock anywhere without an offsite warning. Office Agents outside configured CIDRs are accepted and marked `Offsite IP — Review`; a missing client IP is accepted as `Unknown IP — Review`. If no office network exists, clocks remain available and record `Network detection not configured`. Each event permanently records its network classification, server timestamp, bounded browser description, and raw IP; later policy edits do not rewrite it.
 
-The server—not the browser—chooses the Agent, attendance date, and clock value. It preserves an unfinished Time In until the next scheduled shift starts or 24 hours pass, keeps cross-midnight Graveyard work on the previous attendance date, and gives Overnight work its actual following calendar date. A rest-day action is labeled RDOT In/RDOT Out. Holiday, leave, sick/vacation leave, and transition-off dates are protected. Every action shows a confirmation and uses a unique request ID to prevent duplicate writes. A Time In entered after confirmed absence clears that outcome atomically and records both changes in audit history.
+The server—not the browser—chooses the Agent, attendance date, and clock value. The operational attendance date continues to follow `America/New_York`, while the actual self-service Time In/Time Out value is captured in Philippine time (`Asia/Manila`, UTC+8). It preserves an unfinished Time In until the next scheduled shift starts or 24 hours pass, keeps cross-midnight Graveyard work on the previous attendance date, and gives Overnight work its actual following calendar date. A rest-day action is labeled RDOT In/RDOT Out. Holiday, leave, sick/vacation leave, and transition-off dates are protected. Every action shows a Philippine-time confirmation and uses a unique request ID to prevent duplicate writes. A Time In entered after confirmed absence clears that outcome atomically and records both changes in audit history.
 
 Self-service clocks at least 120 minutes before start or after end create a pending OT review. Agents see that the result is pending. Team Leader and above approve or reject it in Daily Log. Late and undertime remain calculated without approval, and RDOT is not compared with the ordinary roster schedule.
+
+For Overnight schedules starting from midnight through 5:59 AM, timing comparisons reconcile the adjacent calendar date at the midnight boundary. For example, an 11:58 PM Time In for a 12:00 AM start is two minutes early on the Overnight `+1` shift, not late. The original clock timestamp remains unchanged for display and audit.
 
 ## Shift-date rules
 
@@ -294,9 +296,9 @@ If the submitted email belongs to one roster agent but the name strongly matches
 - Tokenized name-match score
 - Team-leader match or mismatch
 - Effective schedule or off status for the selected shift date
-- Distance from the scheduled Time In or Time Out
+- Shift-aware early/late or undertime/after-schedule minutes from the scheduled Time In or Time Out
 
-Schedule and time proximity are context only. They never choose an identity automatically because temporary schedules, shift coverage, and RDOT can legitimately differ from the normal roster schedule. A scheduled Day Off is shown as `possible RDOT`, not as a disqualifying mismatch.
+The minute evidence uses the effective schedule, understands both 12-hour AM/PM and 24-hour values, follows the Overnight `+1` calendar date, and handles shifts crossing midnight. Schedule and time proximity are context only. They never choose an identity automatically because temporary schedules, shift coverage, and RDOT can legitimately differ from the normal roster schedule. A scheduled Day Off is shown as `possible RDOT`, not as a disqualifying mismatch.
 
 Duplicate actions are reduced consistently: the latest Time In is selected, and the earliest Time Out is selected. This also applies when regular and overtime labels are mixed.
 
@@ -344,6 +346,10 @@ Each agent always occupies two rows:
 For Day Off, Holiday Off, Vacation Leave, Sick Leave, Transition Off, or confirmed Absent, the first row contains the status and the second row is blank. RDOT outputs its actual Time In and Time Out values. Missing attendance remains blank and is identified by the Daily Log status.
 
 Use **Copy tracker column**, then paste into a single date column in Google Sheets.
+
+Daily Log shows color-coded status badges, clickable status-count filters, and sorting by Needs review first, tracker order, agent name, or status. The default review-first order brings missing/absence-review records and pending OT above routine Scheduled or Complete rows; full tracker-column copying always preserves the saved tracker order.
+
+Click an Agent name in Shift Log to copy only that Agent's two vertical spreadsheet cells: Time In followed by Time Out. The clipboard includes plain text plus rich HTML for compatible spreadsheet applications. A late Time In or undertime Time Out uses `#FFFF00` on only the affected cell; RDOT uses `#34A853` on both cells. Browsers without rich clipboard support still copy the same two plain-text values without cell colors.
 
 ## Manual entry and September 2026 backfill
 
@@ -407,6 +413,12 @@ To enable the Agent clocking pilot, WFH policy, network classification, and OT r
 [`sql_migrations/33_add_agent_self_service_clock.sql`](../sql_migrations/33_add_agent_self_service_clock.sql)
 
 Migration 33 adds `self_service` attendance source support, pending/approved/rejected OT states, immutable policy/clock/OT audit records, validated PostgreSQL `inet`/`cidr` office networks, and service-role-only atomic RPCs. Apply it after migrations 26–32. The app returns a migration-required message instead of silently omitting these fields when the database is behind.
+
+To store Agent self-service clocks in Philippine time, apply after migration 33:
+
+[`sql_migrations/34_use_philippine_self_service_clock.sql`](../sql_migrations/34_use_philippine_self_service_clock.sql)
+
+Migration 34 keeps Eastern time for operational shift-date selection but stores Time In, Time Out, and the clock audit value as the corresponding `Asia/Manila` wall-clock timestamp. Its versioned RPC name prevents an older database from silently continuing to save Eastern clock values.
 
 ### Before applying it
 
@@ -521,7 +533,8 @@ Schedule entries store agent name and team leader snapshots alongside email, shi
 | `replace_attendance_clock_wfh` | Atomically replaces the WFH selection |
 | `replace_attendance_office_networks` | Atomically replaces labeled office CIDRs |
 | `classify_attendance_network` | Classifies a clock as office, offsite, WFH, unknown, or unconfigured |
-| `clock_attendance_self_service` | Atomically writes one idempotent server-time clock and its audit event |
+| `clock_attendance_self_service` | Internal atomic self-service clock implementation |
+| `clock_attendance_self_service_manila` | Writes one idempotent Philippine-time clock and its audit event |
 | `review_attendance_overtime` | Atomically approves/rejects pending OT and writes audit history |
 
 The new tables use Row Level Security. Browser clients cannot write them directly. The authenticated application API checks the user's database role and performs authorized operations through the server-only Supabase service client.
@@ -531,7 +544,7 @@ The new tables use Row Level Security. Browser clients cannot write them directl
 1. Back up attendance data.
 2. Run the duplicate attendance and roster-email checks.
 3. Apply migration 26.
-4. Apply corrective migrations 28–33 when upgrading an already-installed attendance workspace.
+4. Apply corrective migrations 28–34 when upgrading an already-installed attendance workspace.
 5. Open Attendance using a management account.
 6. Save Tracker Order.
 7. Create the first complete snapshot effective September 1, 2026.

@@ -56,7 +56,7 @@ export default function AgentClockCard({ surface, variant = 'card', onChanged }:
       if (!statusResponse.ok) throw new Error(currentState.error || 'Unable to refresh attendance clock')
       setState(currentState)
       if (!currentState.action || currentState.action !== state.action) throw new Error('Attendance changed. Review the refreshed clock state before continuing.')
-      const confirmation = `${currentState.actionLabel} using server time ${currentState.serverTimestamp}\nResolved attendance date: ${currentState.shiftDate}\nSchedule: ${currentState.startShift || '—'} – ${currentState.endShift || '—'}\nNetwork: ${networkText(currentState.networkStatus)}`
+      const confirmation = `${currentState.actionLabel} using Philippine time (UTC+8) ${currentState.serverTimestamp}\nResolved attendance date: ${currentState.shiftDate}\nSchedule: ${currentState.startShift || '—'} – ${currentState.endShift || '—'}\nNetwork: ${networkText(currentState.networkStatus)}`
       if (!window.confirm(confirmation)) return
       const response = await fetch('/api/attendance/clock', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },

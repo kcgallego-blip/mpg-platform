@@ -4,6 +4,7 @@ import {
   formatAttendanceTime,
   formatAttendanceTime12Hour,
   getDefaultShiftDate,
+  getPhilippineWallClockTimestamp,
   getOperationalCalendarDate,
   getMonthRange,
   inferShiftGroup,
@@ -30,6 +31,11 @@ test('uses a DST-aware 6 AM Eastern business shift-date rollover', () => {
   assert.equal(getDefaultShiftDate(new Date('2026-07-23T10:00:00Z')), '2026-07-23')
   assert.equal(getDefaultShiftDate(new Date('2026-01-23T10:59:59Z')), '2026-01-22')
   assert.equal(getDefaultShiftDate(new Date('2026-01-23T11:00:00Z')), '2026-01-23')
+})
+
+test('captures self-service attendance using Philippine wall-clock time', () => {
+  assert.equal(getPhilippineWallClockTimestamp(new Date('2026-09-12T10:00:00Z')), '2026-09-12 18:00:00')
+  assert.equal(getPhilippineWallClockTimestamp(new Date('2026-01-12T10:00:00Z')), '2026-01-12 18:00:00')
 })
 
 test('infers overnight cohort starts from roster clocks with or without seconds', () => {

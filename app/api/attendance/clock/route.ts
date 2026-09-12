@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getRequestIp } from '@/lib/attendanceNetwork'
-import { isClockMigrationMissing, loadAgentClockState, performAgentClock } from '@/lib/attendanceClockService'
+import { isClockMigrationMissing, isPhilippineClockMigrationMissing, loadAgentClockState, performAgentClock } from '@/lib/attendanceClockService'
 import type { ClockAction, ClockSurface } from '@/lib/attendanceClock'
 import { getAuthenticatedDbUser } from '@/lib/sessionAuth'
 
@@ -52,6 +52,11 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     const concurrent = error?.code === '40001' || /already exists|required before|changed|correction/i.test(error?.message || '')
     const status = Number(error?.status) || (isClockMigrationMissing(error) ? 409 : concurrent ? 409 : 500)
-    return NextResponse.json({ error: isClockMigrationMissing(error) ? 'Apply migration 33_add_agent_self_service_clock.sql before using Agent clocking.' : error?.message || 'Unable to save clock action' }, { status, headers: HEADERS })
+    const migrationError = isPhilippineClockMigrationMissing(error)
+      ? 'Apply migration 34_use_philippine_self_service_clock.sql before using Agent clocking.'
+      : isClockMigrationMissing(error)
+        ? 'Apply migration 33_add_agent_self_service_clock.sql before using Agent clocking.'
+        : null
+    return NextResponse.json({ error: migrationError || error?.message || 'Unable to save clock action' }, { status, headers: HEADERS })
   }
 }

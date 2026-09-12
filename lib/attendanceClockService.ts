@@ -1,7 +1,7 @@
 import 'server-only'
 
 import type { AttendanceNetworkStatus, OvertimeReviewStatus, RosterAttendanceAgent } from './attendance'
-import { addDateKeyDays, getDefaultShiftDate, getEasternWallClockTimestamp, getOperationalCalendarDate, normalizeEmail } from './attendance'
+import { addDateKeyDays, getDefaultShiftDate, getEasternWallClockTimestamp, getOperationalCalendarDate, getPhilippineWallClockTimestamp, normalizeEmail } from './attendance'
 import { chooseCurrentClockDay, getClockActionState, getSelfServiceOtReview, type AgentClockState, type ClockAction, type ClockSurface } from './attendanceClock'
 import { getAttendanceTiming } from './attendanceManagement'
 import { loadAttendanceRoster, loadResolvedAttendance } from './attendanceService'
@@ -14,6 +14,7 @@ export type OfficeNetwork = { id?: string; label: string; network: string; updat
 
 const missingMigration = (error: any) => error?.code === '42P01' || /attendance_clock_agent_policy|attendance_office_networks|clock_attendance_self_service/i.test(error?.message || '')
 export const isClockMigrationMissing = missingMigration
+export const isPhilippineClockMigrationMissing = (error: any) => /clock_attendance_self_service_manila/i.test(error?.message || '')
 
 export const loadClockPolicies = async () => {
   const { data, error } = await db.from('attendance_clock_agent_policy').select('agent_email, self_service_enabled, is_wfh, updated_by, updated_at')
@@ -80,7 +81,7 @@ const buildClockState = async (agent: RosterAttendanceAgent, enabled: boolean, n
   const day = target.day
   return {
     enabled,
-    serverTimestamp: easternTimestamp,
+    serverTimestamp: getPhilippineWallClockTimestamp(now),
     shiftDate: day?.shiftDate || null,
     status: day?.status || 'Unavailable',
     shiftGroup: day?.shiftGroup || null,
@@ -104,7 +105,7 @@ const buildClockState = async (agent: RosterAttendanceAgent, enabled: boolean, n
 
 const buildDisabledClockState = (now: Date): AgentClockState => ({
   enabled: false,
-  serverTimestamp: getEasternWallClockTimestamp(now),
+  serverTimestamp: getPhilippineWallClockTimestamp(now),
   shiftDate: null,
   status: 'Unavailable',
   shiftGroup: null,
@@ -144,19 +145,19 @@ export const performAgentClock = async ({ email, action, surface, requestId, ip,
   if (!context.state.enabled) throw Object.assign(new Error('Self-service clocking is not enabled for your account.'), { status: 403 })
   if (!context.agent) throw Object.assign(new Error('Your account is not linked to an active roster email.'), { status: 409 })
   if (!context.state.shiftDate || context.state.action !== action) throw Object.assign(new Error(context.state.blockedReason || 'Attendance changed. Refresh before clocking.'), { code: '40001' })
-  const easternTimestamp = getEasternWallClockTimestamp(now)
+  const philippineTimestamp = getPhilippineWallClockTimestamp(now)
   const timing = getAttendanceTiming({
     shiftDate: context.state.shiftDate,
     startShift: context.state.startShift,
     endShift: context.state.endShift,
-    timeIn: action === 'time_in' ? easternTimestamp : context.state.timeIn,
-    timeOut: action === 'time_out' ? easternTimestamp : context.state.timeOut,
+    timeIn: action === 'time_in' ? philippineTimestamp : context.state.timeIn,
+    timeOut: action === 'time_out' ? philippineTimestamp : context.state.timeOut,
   })
   const review: OvertimeReviewStatus = getSelfServiceOtReview(
     action === 'time_in' ? timing.preShiftOtMinutes : timing.postShiftOtMinutes,
     context.state.isRdot,
   )
-  const { error } = await db.rpc('clock_attendance_self_service', {
+  const { error } = await db.rpc('clock_attendance_self_service_manila', {
     p_agent_email: context.agent.email,
     p_shift_date: context.state.shiftDate,
     p_action: action,

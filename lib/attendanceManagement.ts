@@ -200,19 +200,6 @@ export const parseGoogleFormPaste = (rawText: string) => {
 
 const timestampValue = (timestamp: string) => Date.parse(`${timestamp.replace(' ', 'T')}Z`)
 
-const clockMinutes = (value: string) => {
-  const match = value.trim().match(/^(\d{1,2}):(\d{2})/)
-  if (!match) return null
-  const hour = Number(match[1])
-  const minute = Number(match[2])
-  return hour <= 23 && minute <= 59 ? hour * 60 + minute : null
-}
-
-const circularMinuteDistance = (first: number, second: number) => {
-  const direct = Math.abs(first - second)
-  return Math.min(direct, 24 * 60 - direct)
-}
-
 const getIdentityScheduleEvidence = (row: ParsedFormRow, day?: ResolvedAttendanceDay) => {
   if (!day) return 'No resolved schedule for this shift date'
   const weekday = getWeekdayForDateKey(day.shiftDate)
@@ -226,12 +213,23 @@ const getIdentityScheduleEvidence = (row: ParsedFormRow, day?: ResolvedAttendanc
   if (day.exceptionKind === 'absent') return 'Absent'
   if (day.exceptionKind === 'transition_off') return 'Transition Off'
 
-  const submittedMinutes = clockMinutes(row.databaseTimestamp.slice(11))
   const scheduledClock = row.action === 'time_in' ? day.startShift : day.endShift
-  const scheduledMinutes = clockMinutes(scheduledClock)
-  if (submittedMinutes === null || scheduledMinutes === null) return `Scheduled ${day.startShift || '—'}–${day.endShift || '—'}`
-  const distance = circularMinuteDistance(submittedMinutes, scheduledMinutes)
-  return `${distance} min from scheduled ${row.action === 'time_in' ? 'Time In' : 'Time Out'} (${scheduledClock})`
+  if (scheduledClockMinutes(scheduledClock) === null || !Number.isFinite(timestampValue(row.databaseTimestamp))) {
+    return `Scheduled ${day.startShift || '—'}–${day.endShift || '—'}`
+  }
+  const timing = getAttendanceTiming({
+    shiftDate: day.shiftDate,
+    startShift: day.startShift,
+    endShift: day.endShift,
+    timeIn: row.action === 'time_in' ? row.databaseTimestamp : null,
+    timeOut: row.action === 'time_out' ? row.databaseTimestamp : null,
+  })
+  const label = row.action === 'time_in' ? 'Time In' : 'Time Out'
+  const earlyOrUnder = row.action === 'time_in' ? timing.preShiftOtMinutes : timing.undertimeMinutes
+  const lateOrOver = row.action === 'time_in' ? timing.lateMinutes : timing.postShiftOtMinutes
+  if (earlyOrUnder > 0) return `${earlyOrUnder} min ${row.action === 'time_in' ? 'early' : 'undertime'} from scheduled ${label} (${scheduledClock})`
+  if (lateOrOver > 0) return `${lateOrOver} min ${row.action === 'time_in' ? 'late' : 'after'} scheduled ${label} (${scheduledClock})`
+  return `On scheduled ${label} (${scheduledClock})`
 }
 
 const isResolvedRestDay = (day?: ResolvedAttendanceDay) => {
@@ -767,6 +765,20 @@ const scheduledClockMinutes = (value: string) => {
 
 const wallClockTimestamp = (value: string | null) => value ? Date.parse(`${value.replace(' ', 'T')}Z`) : Number.NaN
 
+/**
+ * An Overnight clock close to midnight can carry the calendar date adjacent
+ * to its authoritative shift date. Compare the occurrence of that wall clock
+ * nearest to the scheduled boundary without rewriting the timestamp saved for
+ * audit/output. Callers apply this only to midnight-through-5:59 AM starts.
+ */
+const alignClockToScheduledBoundary = (clock: number, scheduledBoundary: number) => {
+  if (!Number.isFinite(clock) || !Number.isFinite(scheduledBoundary)) return clock
+  const candidates = [clock - 86_400_000, clock, clock + 86_400_000]
+  return candidates.reduce((nearest, candidate) =>
+    Math.abs(candidate - scheduledBoundary) < Math.abs(nearest - scheduledBoundary) ? candidate : nearest
+  )
+}
+
 export const getAttendanceTiming = ({ shiftDate, startShift, endShift, timeIn, timeOut }: {
   shiftDate: string
   startShift: string
@@ -782,8 +794,15 @@ export const getAttendanceTiming = ({ shiftDate, startShift, endShift, timeIn, t
   const dayStart = Date.parse(`${shiftDate}T00:00:00Z`)
   const scheduledStart = dayStart + startMinutes * 60_000
   const scheduledEnd = dayStart + endMinutes * 60_000 + (endMinutes <= startMinutes ? 86_400_000 : 0)
-  const actualIn = wallClockTimestamp(timeIn)
-  const actualOut = wallClockTimestamp(timeOut)
+  const isOvernightStart = startMinutes < 6 * 60
+  const parsedActualIn = wallClockTimestamp(timeIn)
+  const parsedActualOut = wallClockTimestamp(timeOut)
+  const actualIn = isOvernightStart
+    ? alignClockToScheduledBoundary(parsedActualIn, scheduledStart)
+    : parsedActualIn
+  const actualOut = isOvernightStart
+    ? alignClockToScheduledBoundary(parsedActualOut, scheduledEnd)
+    : parsedActualOut
   const roundedMinutes = (milliseconds: number) => Math.max(0, Math.round(milliseconds / 60_000))
   return {
     preShiftOtMinutes: Number.isFinite(actualIn) ? roundedMinutes(scheduledStart - actualIn) : 0,

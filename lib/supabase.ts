@@ -579,6 +579,7 @@ export type Database = {
       replace_attendance_office_networks: { Args: { p_entries: Json; p_actor: string }; Returns: number }
       classify_attendance_network: { Args: { p_ip: string | null; p_is_wfh: boolean }; Returns: string }
       clock_attendance_self_service: { Args: { p_agent_email: string; p_shift_date: string; p_action: string; p_surface: string; p_request_id: string; p_recorded_at: string; p_ip: string | null; p_user_agent: string; p_network_status: string; p_ot_review: string }; Returns: Json }
+      clock_attendance_self_service_manila: { Args: { p_agent_email: string; p_shift_date: string; p_action: string; p_surface: string; p_request_id: string; p_recorded_at: string; p_ip: string | null; p_user_agent: string; p_network_status: string; p_ot_review: string }; Returns: Json }
       review_attendance_overtime: { Args: { p_agent_email: string; p_shift_date: string; p_review_field: string; p_decision: string; p_actor: string; p_expected_updated_at: string | null }; Returns: Json }
     }
   }
